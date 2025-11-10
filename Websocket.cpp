@@ -167,17 +167,17 @@ void WebsocketClient::connect(WSInterfaceString host, int port, WSInterfaceStrin
   websockets::WebsocketsClient::connect(this->host.c_str(), this->port, this->path.c_str());
 }
 
-// void WebsocketClient::connectSecure(WSInterfaceString host, int port, WSInterfaceString path) {
-//   WS_DEBUG("Connecting to wss://%s:%d%s\n", host.c_str(), port, path.c_str());
-//   this->host = host;
-//   this->port = port;
-//   this->path = path;
-//   shouldReconnect = true;
-//   heartbeatMissed = 0;
-//   heartbeatInProgress = false;
-//   isSecure = true;
-//   websockets::WebsocketsClient::connect(this->host.c_str(), this->port, this->path.c_str());
-// }
+void WebsocketClient::connectSecure(WSInterfaceString host, int port, WSInterfaceString path) {
+  WS_DEBUG("Connecting to wss://%s:%d%s\n", host.c_str(), port, path.c_str());
+  this->host = host;
+  this->port = port;
+  this->path = path;
+  shouldReconnect = true;
+  heartbeatMissed = 0;
+  heartbeatInProgress = false;
+  isSecure = true;
+  websockets::WebsocketsClient::connect(this->host.c_str(), this->port, this->path.c_str());
+}
 
 void WebsocketClient::resetStreaming() {
     isStreaming = false;
