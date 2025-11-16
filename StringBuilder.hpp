@@ -18,6 +18,20 @@
 #define F(x) x
 #endif
 
+#ifdef SERIAL_DEBUG
+#if defined(ARDUINO)
+#define OTF_DEBUG(...)          \
+  Serial.print("OTF: "); \
+  Serial.printf(__VA_ARGS__)
+#else
+#define OTF_DEBUG(...)          \
+  fprintf(stdout, "OTF: "); \
+  fprintf(stdout, __VA_ARGS__)
+#endif
+#else
+#define OTF_DEBUG(...)
+#endif
+
 namespace OTF {
   typedef std::function<void(const char *data, size_t length, bool streaming)> stream_write_t;
   typedef std::function<void()> stream_flush_t;
@@ -64,9 +78,12 @@ namespace OTF {
 
     void bprintf(const char *format, ...);
 
+    void appendStr(const char *str);
+
 #if defined(ARDUINO)
     void bprintf(const __FlashStringHelper *const format, va_list args);
     void bprintf(const __FlashStringHelper *const format, ...);
+    void appendStr(const __FlashStringHelper *const str);
 #endif
 
     /**

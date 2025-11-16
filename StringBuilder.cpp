@@ -5,6 +5,7 @@ using namespace OTF;
 StringBuilder::StringBuilder(size_t maxLength) {
   this->maxLength = maxLength;
   buffer = new char[maxLength];
+  buffer[0] = '\0';
 }
 
 StringBuilder::~StringBuilder() {
@@ -17,8 +18,7 @@ void StringBuilder::bprintf(const char *format, va_list args) {
     return;
   }
 
-  size_t res = vsnprintf(&buffer[length], maxLength - length, format, args);
-
+  size_t res = vsnprintf(buffer+length, maxLength - length, format, args);
 
   if (streaming && ((res >= maxLength) || (length + res >= maxLength))) {
     // If in streaming mode flush the buffer and continue writing if the data doesn't fit.
@@ -26,7 +26,7 @@ void StringBuilder::bprintf(const char *format, va_list args) {
     first_message = false;
     stream_flush();
     clear();
-    res = vsnprintf(&buffer[length], maxLength - length, format, args);
+    res = vsnprintf(buffer+length, maxLength - length, format, args);
   }
 
   totalLength += res;
@@ -58,7 +58,39 @@ void StringBuilder::bprintf(const __FlashStringHelper *const format, ...) {
   bprintf(format, args);
   va_end(args);
 }
+
+void StringBuilder::appendStr(const __FlashStringHelper *const str) {
+  appendStr((const char *) str);
+}
+
 #endif
+
+void StringBuilder::appendStr(const char *str) {
+  if (!valid || str == nullptr) {
+    return;
+  }
+  size_t res = strlen(str);
+  strncpy(buffer+length, str, maxLength - length);
+
+  if (streaming && ((res >= maxLength) || (length + res >= maxLength))) {
+    // If in streaming mode flush the buffer and continue writing if the data doesn't fit.
+    stream_write(buffer, length, streaming);
+    first_message = false;
+    stream_flush();
+    clear();
+    strncpy(buffer+length, str, maxLength - length);
+  }
+
+  totalLength += res;
+  length += res;
+
+  // The builder is invalid if the string fits perfectly in the buffer since there wouldn't be room for the null terminator.
+  if (length >= maxLength) {
+    // snprintf will not allow more than the specified number of characters to be written to the buffer, so the length will be the buffer size.
+    length = maxLength;
+    valid = false;
+  }
+}
 
 size_t StringBuilder::_write(const char *data, size_t data_length, bool use_pgm) {
   if (!valid) {
@@ -92,12 +124,12 @@ size_t StringBuilder::_write(const char *data, size_t data_length, bool use_pgm)
       // Copy the data to the buffer.
       #if defined(ARDUINO)
       if (use_pgm) {
-        memcpy_P(&buffer[length], &data[write_index], write_length);
+        memcpy_P(buffer+length, &data[write_index], write_length);
       } else {
-        memcpy(&buffer[length], &data[write_index], write_length);
+        memcpy(buffer+length, &data[write_index], write_length);
       }
     #else 
-    memcpy(&buffer[length], &data[write_index], write_length);
+    memcpy(buffer+length, &data[write_index], write_length);
     #endif
       length += write_length;
       totalLength += write_length;

@@ -7,7 +7,7 @@
 /* How often to try to reconnect to the websocket if the connection is lost. Each reconnect attempt is blocking and has
  * a 5 second timeout.
  */
-#define WEBSOCKET_RECONNECT_INTERVAL 5000
+#define WEBSOCKET_RECONNECT_INTERVAL 30000
 
 using namespace OTF;
 
@@ -62,8 +62,8 @@ OpenThingsFramework::OpenThingsFramework(uint16_t webServerPort, const char* web
 
   // Try to reconnect to the websocket if the connection is lost.
   webSocket->setReconnectInterval(WEBSOCKET_RECONNECT_INTERVAL);
-  // Ping the server every 15 seconds with a timeout of 5 seconds, and treat 1 missed ping as a lost connection.
-  webSocket->enableHeartbeat(15000, 5000, 1);
+  // Ping the server every 30 seconds with a timeout of 2 seconds, and treat 3 missed ping as a lost connection.
+  webSocket->enableHeartbeat(30000, 2000, 3);
 }
 
 char *makeMapKey(StringBuilder *sb, HTTPMethod method, const char *path) {
@@ -272,7 +272,7 @@ void OpenThingsFramework::webSocketEventCallback(WSEvent_t type, uint8_t *payloa
 
       char *message_data = (char*) payload;
 
-      if (strncmp_P(message_data, (char *) F("FWD: "), PREFIX_LENGTH) == 0) {
+      if (length > HEADER_LENGTH && strncmp_P(message_data, (char *) F("FWD: "), PREFIX_LENGTH) == 0) {
         OTF_DEBUG(F("Message is a forwarded request.\n"));
         char *requestId = &message_data[PREFIX_LENGTH];
         // Replace the assumed carriage return with a null character to terminate the ID string.
@@ -298,13 +298,16 @@ void OpenThingsFramework::webSocketEventCallback(WSEvent_t type, uint8_t *payloa
           webSocket->end();
         });
 
-        res.bprintf(F("RES: %s\r\n"), requestId);
+        res.appendStr(F("RES: "));
+        res.appendStr(requestId);
+        res.appendStr(F("\r\n"));
+        //res.bprintf(F("RES: %s\r\n"), requestId);
         fillResponse(request, res);
         // Make sure to end the stream if it was enabled.
         res.end();
 
         if (res.isValid()) {
-          OTF_DEBUG("Sent response, %d bytes\n", res.getTotalLength());
+          OTF_DEBUG(F("Sent response, %d bytes\n"), res.getTotalLength());
         } else {
           OTF_DEBUG(F("An error occurred building response string\n"));
           StringBuilder builder(100);
