@@ -7,7 +7,7 @@
 /* How often to try to reconnect to the websocket if the connection is lost. Each reconnect attempt is blocking and has
  * a 5 second timeout.
  */
-#define WEBSOCKET_RECONNECT_INTERVAL 30000
+#define WEBSOCKET_RECONNECT_INTERVAL 5000
 
 using namespace OTF;
 
@@ -63,7 +63,7 @@ OpenThingsFramework::OpenThingsFramework(uint16_t webServerPort, const char* web
   // Try to reconnect to the websocket if the connection is lost.
   webSocket->setReconnectInterval(WEBSOCKET_RECONNECT_INTERVAL);
   // Ping the server every 30 seconds with a timeout of 2 seconds, and treat 3 missed ping as a lost connection.
-  webSocket->enableHeartbeat(30000, 2000, 3);
+  webSocket->enableHeartbeat(15000, 5000, 1);
 }
 
 char *makeMapKey(StringBuilder *sb, HTTPMethod method, const char *path) {
@@ -272,7 +272,7 @@ void OpenThingsFramework::webSocketEventCallback(WSEvent_t type, uint8_t *payloa
 
       char *message_data = (char*) payload;
 
-      if (length > HEADER_LENGTH && strncmp_P(message_data, (char *) F("FWD: "), PREFIX_LENGTH) == 0) {
+      if (strncmp_P(message_data, (char *) F("FWD: "), PREFIX_LENGTH) == 0) {
         OTF_DEBUG(F("Message is a forwarded request.\n"));
         char *requestId = &message_data[PREFIX_LENGTH];
         // Replace the assumed carriage return with a null character to terminate the ID string.
@@ -292,7 +292,7 @@ void OpenThingsFramework::webSocketEventCallback(WSEvent_t type, uint8_t *payloa
           webSocket->send(buffer, length);
         }, [this] () -> void {
           // Flush the websocket stream.
-          webSocket->send("", 0);
+          //webSocket->flush();
         }, [this] () -> void {
           // End the websocket stream.
           webSocket->end();
