@@ -10,7 +10,7 @@ LocalClient *Esp32LocalServer::acceptClient() {
     delete activeClient;
   }
 
-  WiFiClient wiFiClient = server.available();
+  WiFiClient wiFiClient = server.accept();
   if (wiFiClient) {
     activeClient = new Esp32LocalClient(wiFiClient);
   } else {
@@ -61,7 +61,7 @@ void Esp32LocalClient::setTimeout(int timeout) {
 }
 
 void Esp32LocalClient::flush() {
-  client.flush();
+  client.clear();
 }
 
 void Esp32LocalClient::stop() {
