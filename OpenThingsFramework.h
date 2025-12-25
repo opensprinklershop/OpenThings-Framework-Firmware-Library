@@ -55,7 +55,7 @@ namespace OTF {
 
   class OpenThingsFramework {
   private:
-    LOCAL_SERVER_CLASS localServer = LOCAL_SERVER_CLASS(80);
+    LOCAL_SERVER_CLASS localServer = LOCAL_SERVER_CLASS();
     LocalClient *localClient = nullptr;
     WebsocketClient *webSocket = nullptr;
     LinkedMap<callback_t> callbacks;

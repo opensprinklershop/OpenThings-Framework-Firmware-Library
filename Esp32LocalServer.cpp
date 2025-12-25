@@ -1,26 +1,105 @@
 #if defined(ESP32)
 #include "Esp32LocalServer.h"
 
+// Easier access to the classes of the server
+using namespace httpsserver;
+
 using namespace OTF;
 
-Esp32LocalServer::Esp32LocalServer(uint16_t port) : server(port) {}
+Esp32LocalServer::Esp32LocalServer(uint16_t port, bool enableHTTPS, uint16_t httpsPort) 
+  : httpPort(port), httpsPort(httpsPort), useHTTPS(enableHTTPS) {
+  
+  // Create HTTP server
+  insecureServer = new HTTPServer(httpPort);
+  
+  // Create HTTPS server if enabled
+  if (useHTTPS) {
+    cert = new SSLCert(
+      example_crt_DER, example_crt_DER_len,
+      example_key_DER, example_key_DER_len
+    );
+    secureServer = new HTTPSServer(cert, httpsPort);
+  } else {
+    cert = nullptr;
+    secureServer = nullptr;
+  }
+}
+
+Esp32LocalServer::~Esp32LocalServer() {
+  if (activeClient != nullptr) {
+    delete activeClient;
+  }
+  if (insecureServer != nullptr) {
+    delete insecureServer;
+  }
+  if (secureServer != nullptr) {
+    delete secureServer;
+  }
+  if (cert != nullptr) {
+    delete cert;
+  }
+}
 
 LocalClient *Esp32LocalServer::acceptClient() {
   if (activeClient != nullptr) {
     delete activeClient;
-  }
-
-  WiFiClient wiFiClient = server.accept();
-  if (wiFiClient) {
-    activeClient = new Esp32LocalClient(wiFiClient);
-  } else {
     activeClient = nullptr;
   }
-  return activeClient;
+
+  // Check HTTP server first
+  if (insecureServer != nullptr) {
+    WiFiClient wiFiClient = insecureServer->accept();
+    if (wiFiClient) {
+      activeClient = new Esp32LocalClient(wiFiClient);
+      return activeClient;
+    }
+  }
+  
+  // Check HTTPS server if enabled
+  if (secureServer != nullptr) {
+    WiFiClient wiFiClient = secureServer->accept();
+    if (wiFiClient) {
+      activeClient = new Esp32LocalClient(wiFiClient);
+      return activeClient;
+    }
+  }
+  
+  return nullptr;
 }
 
 void Esp32LocalServer::begin() {
-  server.begin();
+  // Start HTTP server
+  if (insecureServer != nullptr) {
+    insecureServer->begin();
+  }
+  
+  // Start HTTPS server if enabled
+  if (secureServer != nullptr) {
+    secureServer->begin();
+  }
+}
+
+void Esp32LocalServer::setHTTPS(bool enable) {
+  useHTTPS = enable;
+  
+  // If enabling HTTPS and not yet created
+  if (enable && secureServer == nullptr) {
+    cert = new SSLCert(
+      example_crt_DER, example_crt_DER_len,
+      example_key_DER, example_key_DER_len
+    );
+    secureServer = new HTTPSServer(cert, httpsPort);
+    secureServer->begin();
+  }
+  // If disabling HTTPS and exists
+  else if (!enable && secureServer != nullptr) {
+    delete secureServer;
+    secureServer = nullptr;
+    if (cert != nullptr) {
+      delete cert;
+      cert = nullptr;
+    }
+  }
 }
 
 
