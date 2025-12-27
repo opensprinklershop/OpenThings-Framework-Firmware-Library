@@ -22,10 +22,7 @@
 #include <ResourceNode.hpp>
 
 // Include self-signed certificate data
-extern const unsigned char example_crt_DER[];
-extern const unsigned int example_crt_DER_len;
-extern const unsigned char example_key_DER[];
-extern const unsigned int example_key_DER_len;
+#include "cert.h"
 
 namespace OTF {
   class Esp32LocalClient : public LocalClient {
@@ -62,8 +59,7 @@ namespace OTF {
     Esp32LocalServer(uint16_t port = 80, bool enableHTTPS = true, uint16_t httpsPort = 443);
     ~Esp32LocalServer();
 
-    LocalClient *acceptClient();
-    void begin();
+    void begin(httpsserver::HTTPSMiddlewareFunction * handler);
     void setHTTPS(bool enable);
     httpsserver::HTTPSServer* getHTTPSServer() { return secureServer; }
     httpsserver::HTTPServer* getHTTPServer() { return insecureServer; }

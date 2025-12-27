@@ -40,42 +40,17 @@ Esp32LocalServer::~Esp32LocalServer() {
   }
 }
 
-LocalClient *Esp32LocalServer::acceptClient() {
-  if (activeClient != nullptr) {
-    delete activeClient;
-    activeClient = nullptr;
-  }
-
-  // Check HTTP server first
-  if (insecureServer != nullptr) {
-    WiFiClient wiFiClient = insecureServer->accept();
-    if (wiFiClient) {
-      activeClient = new Esp32LocalClient(wiFiClient);
-      return activeClient;
-    }
-  }
-  
-  // Check HTTPS server if enabled
-  if (secureServer != nullptr) {
-    WiFiClient wiFiClient = secureServer->accept();
-    if (wiFiClient) {
-      activeClient = new Esp32LocalClient(wiFiClient);
-      return activeClient;
-    }
-  }
-  
-  return nullptr;
-}
-
-void Esp32LocalServer::begin() {
+void Esp32LocalServer::begin(httpsserver::HTTPSMiddlewareFunction * handler) {
   // Start HTTP server
   if (insecureServer != nullptr) {
-    insecureServer->begin();
+    insecureServer->start();
+    insecureServer->addMiddleware(handler);
   }
   
   // Start HTTPS server if enabled
   if (secureServer != nullptr) {
-    secureServer->begin();
+    secureServer->start();
+    secureServer->addMiddleware(handler);
   }
 }
 
@@ -89,7 +64,7 @@ void Esp32LocalServer::setHTTPS(bool enable) {
       example_key_DER, example_key_DER_len
     );
     secureServer = new HTTPSServer(cert, httpsPort);
-    secureServer->begin();
+    secureServer->start();
   }
   // If disabling HTTPS and exists
   else if (!enable && secureServer != nullptr) {

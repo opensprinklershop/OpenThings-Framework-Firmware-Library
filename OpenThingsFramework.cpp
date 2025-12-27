@@ -21,7 +21,24 @@ OpenThingsFramework::OpenThingsFramework(uint16_t webServerPort, char *hdBuffer,
     headerBufferSize = HEADERS_BUFFER_SIZE;
   }
   missingPageCallback = defaultMissingPageCallback;
-  localServer.begin();
+  
+  // Create middleware function for routing
+  static auto middlewareHandler = new httpsserver::HTTPSMiddlewareFunction(
+    [this](httpsserver::HTTPRequest * req, httpsserver::HTTPResponse * res, std::function<void()> next) -> void {
+      // Convert HTTPRequest and HTTPResponse to OpenThings Request and Response
+      Request otfRequest(req);
+      Response otfResponse(res);
+
+      // Fill the response using the registered callbacks
+      fillResponse(otfRequest, otfResponse);
+
+      // Call next to continue processing (if needed)
+      next();
+    }
+  );
+  
+  localServer.begin(middlewareHandler);
+  OTF_DEBUG("OTF instantiated\n");
 };
 
 #if defined(ARDUINO)
