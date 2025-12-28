@@ -341,7 +341,8 @@ void OpenThingsFramework::fillResponse(const Request &req, Response &res) {
   if (req.getType() == INVALID) {
     res.writeStatus(400, F("Invalid request"));
     res.writeHeader(F("content-type"), F("text/plain"));
-    res.writeBodyChunk(F("Could not parse request"));
+    const char* msg = "Could not parse request";
+    res.writeBodyData(msg, strlen(msg));
     return;
   }
 
@@ -376,7 +377,8 @@ void OpenThingsFramework::fillResponse(const Request &req, Response &res) {
 void OpenThingsFramework::defaultMissingPageCallback(const Request &req, Response &res) {
   res.writeStatus(404, F("Not found"));
   res.writeHeader(F("content-type"), F("text/plain"));
-  res.writeBodyChunk(F("The requested page does not exist"));
+  const char* msg = "The requested page does not exist";
+  res.writeBodyData(msg, strlen(msg));
 }
 
 void OpenThingsFramework::setCloudStatus(CLOUD_STATUS status) {

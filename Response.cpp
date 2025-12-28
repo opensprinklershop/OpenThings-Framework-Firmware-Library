@@ -106,38 +106,6 @@ void Response::writeHeader(const char *name, const char *value) {
 }
 #endif
 
-void Response::writeBodyChunk(const char *const format, ...) {
-  if (responseStatus < STATUS_WRITTEN) {
-    valid = false;
-    return;
-  }
-  if (responseStatus != BODY_WRITTEN) {
-responseStatus = BODY_WRITTEN;
-  }
-
-  va_list args;
-  va_start(args, format);
-va_end(args);
-}
-
-#if defined(ARDUINO)
-void Response::writeBodyChunk(const __FlashStringHelper *const format, ...) {
-  if (responseStatus < STATUS_WRITTEN) {
-    valid = false;
-    return;
-  }
-  if (responseStatus != BODY_WRITTEN) {
-    bprintf((char *) "\r\n");
-    responseStatus = BODY_WRITTEN;
-  }
-
-  va_list args;
-  va_start(args, format);
-  bprintf(format, args);
-  va_end(args);
-}
-#endif
-
 void Response::writeBodyData(const char *data, size_t length) {
   if (responseStatus < STATUS_WRITTEN) {
     valid = false;

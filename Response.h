@@ -63,11 +63,9 @@ namespace OTF {
      * @param format The format string to pass to sprintf.
      * @param ... The format arguments to pass to sprintf.
      */
-    void writeBodyChunk(const char *format, ...);
     void writeBodyData(const char *data, size_t max_length);
 
 #if defined(ARDUINO)
-    void writeBodyChunk(const __FlashStringHelper *const format, ...);
     void writeBodyData(const __FlashStringHelper *const data, size_t max_length);
 #endif
   };
