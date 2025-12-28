@@ -125,7 +125,7 @@ void OpenThingsFramework::localServerLoop() {
   char *buffer = headerBuffer;
   size_t length = 0;
   while (localClient->dataAvailable()&&millis()<timeout) {
-    if (length >= headerBufferSize) {
+    if (length >= (size_t)headerBufferSize) {
       localClient->print(F("HTTP/1.1 413 Request too large\r\n\r\nThe request was too large"));
       // Get a new client to indicate that the previous client is no longer needed.
       localClient = localServer.acceptClient();
