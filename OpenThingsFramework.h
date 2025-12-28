@@ -55,7 +55,7 @@ namespace OTF {
 
   class OpenThingsFramework {
   private:
-    LOCAL_SERVER_CLASS localServer = LOCAL_SERVER_CLASS();
+    LOCAL_SERVER_CLASS localServer;
     LocalClient *localClient = nullptr;
     WebsocketClient *webSocket = nullptr;
     LinkedMap<callback_t> callbacks;
@@ -67,13 +67,13 @@ namespace OTF {
 
     void webSocketEventCallback(WSEvent_t type, uint8_t *payload, size_t length);
 
-    void fillResponse(const Request &req, Response &res);
     void localServerLoop();
     void setCloudStatus(CLOUD_STATUS status);
 
     static void defaultMissingPageCallback(const Request &req, Response &res);
 
   public:
+    void fillResponse(const Request &req, Response &res);
     /**
      * Initializes the library to only listen on a local webserver.
      * @param webServerPort The local port to bind the webserver to.

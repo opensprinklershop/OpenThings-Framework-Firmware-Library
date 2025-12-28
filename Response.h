@@ -30,7 +30,6 @@ namespace OTF {
 
     Response() : StringBuilder(RESPONSE_BUFFER_SIZE) {}
 
-
   public:
     static const size_t MAX_RESPONSE_LENGTH = RESPONSE_BUFFER_SIZE;
 

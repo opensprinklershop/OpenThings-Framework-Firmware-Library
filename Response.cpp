@@ -72,7 +72,7 @@ void Response::writeHeader(const __FlashStringHelper *const name, int value) {
   }
   responseStatus = HEADERS_WRITTEN;
 
-  bprintf(F("%s: %d\r\n"), name, value);
+bprintf(F("%s: %d\r\n"), name, value);
 }
 
 void Response::writeHeader(const __FlashStringHelper *const name, const __FlashStringHelper *const value) {
@@ -82,7 +82,7 @@ void Response::writeHeader(const __FlashStringHelper *const name, const __FlashS
   }
   responseStatus = HEADERS_WRITTEN;
 
-  bprintf(F("%s: %s\r\n"), name, value);
+bprintf(F("%s: %s\r\n"), name, value);
 }
 #else
 void Response::writeHeader(const char *name, int value) {
@@ -112,14 +112,12 @@ void Response::writeBodyChunk(const char *const format, ...) {
     return;
   }
   if (responseStatus != BODY_WRITTEN) {
-    bprintf("\r\n");
-    responseStatus = BODY_WRITTEN;
+responseStatus = BODY_WRITTEN;
   }
 
   va_list args;
   va_start(args, format);
-  bprintf(format, args);
-  va_end(args);
+va_end(args);
 }
 
 #if defined(ARDUINO)
@@ -146,11 +144,9 @@ void Response::writeBodyData(const char *data, size_t length) {
     return;
   }
   if (responseStatus != BODY_WRITTEN) {
-    bprintf((char *) "\r\n");
-    responseStatus = BODY_WRITTEN;
+responseStatus = BODY_WRITTEN;
   }
 
-  write(data, length);
 }
 
 #if defined(ARDUINO)

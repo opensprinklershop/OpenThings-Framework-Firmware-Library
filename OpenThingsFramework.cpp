@@ -22,22 +22,7 @@ OpenThingsFramework::OpenThingsFramework(uint16_t webServerPort, char *hdBuffer,
   }
   missingPageCallback = defaultMissingPageCallback;
   
-  // Create middleware function for routing
-  static auto middlewareHandler = new httpsserver::HTTPSMiddlewareFunction(
-    [this](httpsserver::HTTPRequest * req, httpsserver::HTTPResponse * res, std::function<void()> next) -> void {
-      // Convert HTTPRequest and HTTPResponse to OpenThings Request and Response
-      Request otfRequest(req);
-      Response otfResponse(res);
-
-      // Fill the response using the registered callbacks
-      fillResponse(otfRequest, otfResponse);
-
-      // Call next to continue processing (if needed)
-      next();
-    }
-  );
-  
-  localServer.begin(middlewareHandler);
+  localServer.begin();
   OTF_DEBUG("OTF instantiated\n");
 };
 
@@ -171,7 +156,7 @@ void OpenThingsFramework::localServerLoop() {
     return;
   }
 
-  OTF_DEBUG(F("Parsing request"));
+  OTF_DEBUG(F("Parsing request\n"));
   Request request(buffer, length, false);
 
   char *bodyBuffer = NULL;
@@ -211,7 +196,9 @@ void OpenThingsFramework::localServerLoop() {
 
   // Make response stream to client
   Response res = Response();
+  OTF_DEBUG(F("Setting up response stream for local client\n"));
   res.enableStream([this](const char *buffer, size_t length, bool first_message) -> void {
+    OTF_DEBUG(F("Stream write: %d bytes, first=%d\n"), length, first_message);
     localClient->write(buffer, length);
   }, [this]() -> void {
     localClient->flush();
@@ -220,8 +207,10 @@ void OpenThingsFramework::localServerLoop() {
   });
   fillResponse(request, res);
 
+  OTF_DEBUG(F("Before res.end(): valid=%d, length=%d\n"), res.isValid(), res.getTotalLength());
   // Make sure to end the stream if it was enabled.
   res.end();
+  OTF_DEBUG(F("After res.end(): valid=%d, length=%d\n"), res.isValid(), res.getTotalLength());
 
   if(bodyBuffer) delete[] bodyBuffer;
   if (res.isValid()) {
@@ -375,9 +364,12 @@ void OpenThingsFramework::fillResponse(const Request &req, Response &res) {
   if (callback != nullptr) {
     OTF_DEBUG(F("Found callback\n"));
     callback(req, res);
+    OTF_DEBUG(F("Callback executed, response valid: %d, total length: %d\n"), res.isValid(), res.getTotalLength());
   } else {
+    OTF_DEBUG(F("No callback found, running missing page callback\n"));
     // Run the missing page callback if none of the registered paths matched.
     missingPageCallback(req, res);
+    OTF_DEBUG(F("Missing page callback executed\n"));
   }
 }
 
