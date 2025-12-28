@@ -162,7 +162,7 @@ void StringBuilder::enableStream(stream_write_t write, stream_flush_t flush, str
 
 bool StringBuilder::end() {
   if (stream_end) {
-    stream_write(buffer, length, streaming);
+    stream_write(buffer, length, first_message);
     stream_end();
     return true;
   }

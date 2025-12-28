@@ -12,6 +12,82 @@
 #endif
 
 // ============================================================================
+// Custom BIO callbacks for WiFiClient (non-blocking I/O)
+// ============================================================================
+
+// Context structure to pass WiFiClient to mbedTLS
+struct wifi_client_context {
+  WiFiClient* client;
+  unsigned long last_activity;
+};
+
+// Custom send callback for WiFiClient
+static int wifi_client_send(void* ctx, const unsigned char* buf, size_t len) {
+  wifi_client_context* wctx = (wifi_client_context*)ctx;
+  if (!wctx || !wctx->client) {
+    Serial.printf("wifi_client_send: invalid context\n");
+    return MBEDTLS_ERR_NET_CONN_RESET;
+  }
+  
+  if (!wctx->client->connected()) {
+    Serial.printf("wifi_client_send: client disconnected\n");
+    return MBEDTLS_ERR_NET_CONN_RESET;
+  }
+  
+  size_t written = wctx->client->write(buf, len);
+  if (written > 0) {
+    wctx->last_activity = millis();
+    Serial.printf("wifi_client_send: wrote %d bytes\n", written);
+    return written;
+  }
+  
+  // If nothing written, check if still connected
+  if (!wctx->client->connected()) {
+    Serial.printf("wifi_client_send: client disconnected after write attempt\n");
+    return MBEDTLS_ERR_NET_CONN_RESET;
+  }
+  
+  Serial.printf("wifi_client_send: write returned 0, returning WANT_WRITE\n");
+  return MBEDTLS_ERR_SSL_WANT_WRITE;
+}
+
+// Custom receive callback for WiFiClient
+static int wifi_client_recv(void* ctx, unsigned char* buf, size_t len) {
+  wifi_client_context* wctx = (wifi_client_context*)ctx;
+  if (!wctx || !wctx->client) {
+    Serial.printf("wifi_client_recv: invalid context\n");
+    return MBEDTLS_ERR_NET_CONN_RESET;
+  }
+  
+  if (!wctx->client->connected()) {
+    Serial.printf("wifi_client_recv: client disconnected\n");
+    return MBEDTLS_ERR_NET_CONN_RESET;
+  }
+  
+  int available = wctx->client->available();
+  if (available > 0) {
+    size_t to_read = (available < (int)len) ? available : len;
+    size_t actually_read = wctx->client->readBytes(buf, to_read);
+    if (actually_read > 0) {
+      wctx->last_activity = millis();
+      Serial.printf("wifi_client_recv: read %d bytes\n", actually_read);
+      return actually_read;
+    }
+  }
+  
+  // Check for timeout (10 seconds)
+  unsigned long idle_time = millis() - wctx->last_activity;
+  if (idle_time > 10000) {
+    Serial.printf("wifi_client_recv: timeout after %lu ms\n", idle_time);
+    return MBEDTLS_ERR_NET_CONN_RESET;
+  }
+  
+  // No data available yet
+  Serial.printf("wifi_client_recv: no data, returning WANT_READ (idle: %lu ms)\n", idle_time);
+  return MBEDTLS_ERR_SSL_WANT_READ;
+}
+
+// ============================================================================
 // WiFiSecureServer Implementation (SSL/TLS with mbedTLS)
 // ============================================================================
 
@@ -140,23 +216,30 @@ WiFiClient WiFiSecureServer::accept() {
 }
 
 
-mbedtls_ssl_context* WiFiSecureServer::createSSL(int socketFd, int** outSocketFdPtr) {
+mbedtls_ssl_context* WiFiSecureServer::createSSL(WiFiClient* wifiClient, wifi_client_context** outContext) {
   if (!initialized) {
     OTF_DEBUG("SSL context not initialized\n");
+    return nullptr;
+  }
+  
+  if (!wifiClient || !wifiClient->connected()) {
+    OTF_DEBUG("Invalid or disconnected WiFiClient\n");
     return nullptr;
   }
   
   Serial.printf("createSSL: Free heap: %d bytes, largest block: %d bytes\n", 
                 ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   
-  // Allocate new SSL context with persistent socket FD storage
+  // Allocate WiFi client context
+  wifi_client_context* ctx = new wifi_client_context();
+  ctx->client = wifiClient;
+  ctx->last_activity = millis();
+  
+  // Allocate new SSL context
   mbedtls_ssl_context* ssl = new mbedtls_ssl_context();
   mbedtls_ssl_init(ssl);
   
   Serial.printf("After ssl_init: Free heap: %d bytes\n", ESP.getFreeHeap());
-  
-  // Allocate persistent socket FD (will be freed by caller)
-  int* persistentFd = new int(socketFd);
   
   Serial.printf("Calling mbedtls_ssl_setup...\n");
   
@@ -167,7 +250,7 @@ mbedtls_ssl_context* WiFiSecureServer::createSSL(int socketFd, int** outSocketFd
     mbedtls_strerror(ret, errBuf, sizeof(errBuf));
     Serial.printf("mbedtls_ssl_setup failed: -0x%x (%s)\n", -ret, errBuf);
     Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
-    delete persistentFd;  // Free persistent FD
+    delete ctx;
     mbedtls_ssl_free(ssl);
     delete ssl;
     return nullptr;
@@ -175,11 +258,10 @@ mbedtls_ssl_context* WiFiSecureServer::createSSL(int socketFd, int** outSocketFd
   
   Serial.printf("mbedtls_ssl_setup successful\n");
   
-  // Set BIO callbacks using mbedTLS built-in socket I/O (like esp32_https_server)
-  // Note: mbedtls_net_send/recv expect ctx to point to an int (socket FD)
-  mbedtls_ssl_set_bio(ssl, persistentFd, mbedtls_net_send, mbedtls_net_recv, NULL);
+  // Set BIO callbacks using WiFiClient
+  mbedtls_ssl_set_bio(ssl, ctx, wifi_client_send, wifi_client_recv, NULL);
   
-  Serial.printf("BIO callbacks set, socket FD: %d\n", *persistentFd);
+  Serial.printf("BIO callbacks set for WiFiClient\n");
   Serial.printf("Starting SSL handshake...\n");
   
   // Perform SSL handshake with timeout
@@ -188,8 +270,10 @@ mbedtls_ssl_context* WiFiSecureServer::createSSL(int socketFd, int** outSocketFd
   
   while ((ret = mbedtls_ssl_handshake(ssl)) != 0) {
     if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
-      Serial.printf("mbedtls_ssl_handshake failed: -0x%x\n", -ret);
-      delete persistentFd;
+      char errBuf[100];
+      mbedtls_strerror(ret, errBuf, sizeof(errBuf));
+      Serial.printf("mbedtls_ssl_handshake failed: -0x%x (%s)\n", -ret, errBuf);
+      delete ctx;
       mbedtls_ssl_free(ssl);
       delete ssl;
       return nullptr;
@@ -198,7 +282,7 @@ mbedtls_ssl_context* WiFiSecureServer::createSSL(int socketFd, int** outSocketFd
     // Check timeout
     if (millis() - handshakeStart > HANDSHAKE_TIMEOUT) {
       Serial.printf("SSL handshake timeout!\n");
-      delete persistentFd;
+      delete ctx;
       mbedtls_ssl_free(ssl);
       delete ssl;
       return nullptr;
@@ -206,15 +290,15 @@ mbedtls_ssl_context* WiFiSecureServer::createSSL(int socketFd, int** outSocketFd
     
     // Small delay to allow other tasks
     delay(10);
-    Serial.printf(".");
   }
   
-  // Return persistent FD to caller for cleanup
-  if (outSocketFdPtr) {
-    *outSocketFdPtr = persistentFd;
+  Serial.printf("SSL handshake successful!\n");
+  
+  // Return context to caller for cleanup
+  if (outContext) {
+    *outContext = ctx;
   }
   
-  OTF_DEBUG("SSL handshake successful\n");
   return ssl;
 }
 
@@ -274,22 +358,21 @@ LocalClient *Esp32LocalServer::acceptClient() {
   if (httpsServer) {
     WiFiClient wifiClient = httpsServer->accept();
     if (wifiClient) {
-      int sockFd = wifiClient.fd();
-      Serial.printf("HTTPS WiFiClient accepted, FD: %d\n", sockFd);
+      Serial.printf("HTTPS WiFiClient accepted, connected: %d\n", wifiClient.connected());
       
       // Create SSL connection with handshake
-      int* persistentFd = nullptr;
-      mbedtls_ssl_context* ssl = httpsServer->createSSL(sockFd, &persistentFd);
+      wifi_client_context* clientContext = nullptr;
+      mbedtls_ssl_context* ssl = httpsServer->createSSL(&wifiClient, &clientContext);
       if (ssl) {
         // Create HTTPS client with SSL context
-        activeClient = new Esp32HttpsClient(wifiClient, ssl, persistentFd);
+        activeClient = new Esp32HttpsClient(wifiClient, ssl, clientContext);
         return activeClient;
       } else {
-        Serial.printf("SSL handshake failed, closing socket\n");
-        if (persistentFd) {
-          close(*persistentFd);
-          delete persistentFd;
+        Serial.printf("SSL handshake failed, closing connection\n");
+        if (clientContext) {
+          delete clientContext;
         }
+        wifiClient.stop();
       }
     }
   }
@@ -333,6 +416,8 @@ void Esp32HttpClient::print(const __FlashStringHelper *data) {
 }
 
 size_t Esp32HttpClient::write(const char *buffer, size_t length) {
+  OTF_DEBUG("HTTP write: %d bytes\n", length);
+  OTF_DEBUG("Content: %.*s\n", length, buffer);
   return client.write((const uint8_t *)buffer, length);
 }
 
@@ -345,7 +430,9 @@ void Esp32HttpClient::setTimeout(int timeout) {
 }
 
 void Esp32HttpClient::flush() {
+  OTF_DEBUG("HTTP flush: sending buffered data\n");
   client.clear();
+  OTF_DEBUG("HTTP flush: complete\n");
 }
 
 void Esp32HttpClient::stop() {
@@ -357,8 +444,8 @@ void Esp32HttpClient::stop() {
 // Esp32HttpsClient Implementation (HTTPS with SSL/TLS)
 // ============================================================================
 
-Esp32HttpsClient::Esp32HttpsClient(WiFiClient wifiClient, mbedtls_ssl_context* sslContext, int* socketFd)
-  : client(wifiClient), ssl(sslContext), sslSocketFd(socketFd), isActive(true) {
+Esp32HttpsClient::Esp32HttpsClient(WiFiClient wifiClient, mbedtls_ssl_context* sslContext, wifi_client_context* context)
+  : client(wifiClient), ssl(sslContext), clientContext(context), isActive(true) {
   OTF_DEBUG("HTTPS client initialized with SSL\n");
 }
 
@@ -425,11 +512,10 @@ void Esp32HttpsClient::stop() {
   delete ssl;
   ssl = nullptr;
   
-  // Close and free socket FD
-  if (sslSocketFd) {
-    close(*sslSocketFd);
-    delete sslSocketFd;
-    sslSocketFd = nullptr;
+  // Free client context
+  if (clientContext) {
+    delete clientContext;
+    clientContext = nullptr;
   }
   
   client.stop();

@@ -4,7 +4,6 @@
     "author": "rayshobby/OpenSprinklerShop",
     "description": "OpenThings Framework Library",
     "dependencies": {
-        "WebSockets": "opensprinklershop/arduinoWebSockets",
-        "WebServre": "meshtastic/esp32_https_server"
+        "WebSockets": "opensprinklershop/arduinoWebSockets"
     }
 }

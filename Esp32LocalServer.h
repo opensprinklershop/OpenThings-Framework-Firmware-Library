@@ -19,6 +19,9 @@
 // Include self-signed certificate data
 #include "cert.h"
 
+// Forward declaration for WiFi client context (defined in .cpp)
+struct wifi_client_context;
+
 // WiFiSecureServer: SSL/TLS wrapper für WiFiServer mit mbedTLS
 class WiFiSecureServer {
 private:
@@ -44,7 +47,7 @@ public:
   
   bool begin();
   WiFiClient accept();
-  mbedtls_ssl_context* createSSL(int socketFd, int** outSocketFdPtr);
+  mbedtls_ssl_context* createSSL(WiFiClient* wifiClient, wifi_client_context** outContext);
   
   mbedtls_ssl_config* getSSLConfig() { return &sslConf; }
 };
@@ -81,10 +84,10 @@ namespace OTF {
   private:
     WiFiClient client;           // Base WiFiClient
     mbedtls_ssl_context* ssl;    // SSL context for TLS
-    int* sslSocketFd;            // Persistent socket FD for SSL BIO
+    wifi_client_context* clientContext;  // WiFi client context for SSL BIO
     bool isActive;
 
-    Esp32HttpsClient(WiFiClient wifiClient, mbedtls_ssl_context* sslContext, int* socketFd);
+    Esp32HttpsClient(WiFiClient wifiClient, mbedtls_ssl_context* sslContext, wifi_client_context* context);
     ~Esp32HttpsClient();
 
   public:

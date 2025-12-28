@@ -144,9 +144,11 @@ void Response::writeBodyData(const char *data, size_t length) {
     return;
   }
   if (responseStatus != BODY_WRITTEN) {
-responseStatus = BODY_WRITTEN;
+    bprintf((char *) "\r\n");
+    responseStatus = BODY_WRITTEN;
   }
 
+  write(data, length);
 }
 
 #if defined(ARDUINO)
