@@ -36,7 +36,9 @@ namespace OTF {
     /** Writes the status code/message to the response. This must be called before writing the headers or body. */
     #if defined(ARDUINO)
     void writeStatus(uint16_t statusCode, const String &statusMessage);
+    #if !defined(ESP32)
     void writeStatus(uint16_t statusCode, const __FlashStringHelper *const statusMessage);
+    #endif
     #else
     void writeStatus(uint16_t statusCode, const char *statusMessage);
     #endif

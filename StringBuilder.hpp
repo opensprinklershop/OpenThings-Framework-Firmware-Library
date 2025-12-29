@@ -90,6 +90,7 @@ namespace OTF {
      * Raw Write to buffer
      */
     size_t write(const char *data, size_t length);
+    size_t write(const char *data);
 
 
     #if defined(ARDUINO)
@@ -97,6 +98,7 @@ namespace OTF {
      * Raw Write to buffer from PROGMEM
      */
     size_t write_P(const __FlashStringHelper *const data, size_t length);
+    size_t write_P(const __FlashStringHelper *const data);
     #endif
 
     /**

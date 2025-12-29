@@ -122,9 +122,9 @@ size_t StringBuilder::_write(const char *data, size_t data_length, bool use_pgm)
       }
     } else {
       // Copy the data to the buffer.
-      #if defined(ARDUINO)
+      #if defined(ARDUINO) && !defined(ESP32)
       if (use_pgm) {
-        memcpy_P(buffer+length, &data[write_index], write_length);
+        memcpy_P(buffer+length, (PGM_P)(&data[write_index]), write_length);
       } else {
         memcpy(buffer+length, &data[write_index], write_length);
       }
@@ -146,10 +146,19 @@ size_t StringBuilder::write(const char *data, size_t data_length) {
   return _write(data, data_length, false);
 }
 
-#if defined(ARDUINO)
+size_t StringBuilder::write(const char *data) {
+  return _write(data, strlen(data), false);
+}
+
+#if defined(ARDUINO) 
 size_t StringBuilder::write_P(const __FlashStringHelper *const data, size_t data_length) {
   return _write((const char *) data, data_length, true);
 }
+
+size_t StringBuilder::write_P(const __FlashStringHelper *const data) {
+  return _write((const char *) data, strlen_P((PGM_P)data), true);
+}
+
 #endif
 
 void StringBuilder::enableStream(stream_write_t write, stream_flush_t flush, stream_end_t end) {
@@ -162,7 +171,7 @@ void StringBuilder::enableStream(stream_write_t write, stream_flush_t flush, str
 
 bool StringBuilder::end() {
   if (stream_end) {
-    stream_write(buffer, length, first_message);
+    stream_write(buffer, length, streaming);
     stream_end();
     return true;
   }

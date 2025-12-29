@@ -13,6 +13,7 @@ void Response::writeStatus(uint16_t statusCode, const String &statusMessage) {
   bprintf(F("HTTP/1.1 %d %s\r\n"), statusCode, statusMessage.c_str());
 }
 
+#if !defined(ESP32)
 void Response::writeStatus(uint16_t statusCode, const __FlashStringHelper *const statusMessage) {
   if (responseStatus > CREATED) {
     valid = false;
@@ -22,6 +23,8 @@ void Response::writeStatus(uint16_t statusCode, const __FlashStringHelper *const
 
   bprintf(F("HTTP/1.1 %d %s\r\n"), statusCode, statusMessage);
 }
+#endif
+
 #else
 void Response::writeStatus(uint16_t statusCode, const char *statusMessage) {
   if (responseStatus > CREATED) {
@@ -72,7 +75,7 @@ void Response::writeHeader(const __FlashStringHelper *const name, int value) {
   }
   responseStatus = HEADERS_WRITTEN;
 
-bprintf(F("%s: %d\r\n"), name, value);
+  bprintf(F("%s: %d\r\n"), name, value);
 }
 
 void Response::writeHeader(const __FlashStringHelper *const name, const __FlashStringHelper *const value) {
@@ -82,7 +85,7 @@ void Response::writeHeader(const __FlashStringHelper *const name, const __FlashS
   }
   responseStatus = HEADERS_WRITTEN;
 
-bprintf(F("%s: %s\r\n"), name, value);
+  bprintf(F("%s: %s\r\n"), name, value);
 }
 #else
 void Response::writeHeader(const char *name, int value) {
@@ -112,7 +115,7 @@ void Response::writeBodyData(const char *data, size_t length) {
     return;
   }
   if (responseStatus != BODY_WRITTEN) {
-    bprintf((char *) "\r\n");
+    appendStr("\r\n");
     responseStatus = BODY_WRITTEN;
   }
 
@@ -126,7 +129,7 @@ void Response::writeBodyData(const __FlashStringHelper *const data, size_t lengt
     return;
   }
   if (responseStatus != BODY_WRITTEN) {
-    bprintf((char *) "\r\n");
+    appendStr("\r\n");
     responseStatus = BODY_WRITTEN;
   }
 

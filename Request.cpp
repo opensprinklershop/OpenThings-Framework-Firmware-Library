@@ -286,7 +286,7 @@ void Request::decodeQueryParameter(char *value) {
 
 char *Request::getPath() const { return path; }
 
-#if defined(ARDUINO)
+#if defined(ARDUINO) 
 char *Request::getQueryParameter(const __FlashStringHelper *key) const { return queryParams.find(key); }
 #endif
 
@@ -294,7 +294,7 @@ char *Request::getQueryParameter(const char *key) const { return queryParams.fin
 
 char *Request::getHeader(const char *key) const { return headers.find(key); }
 
-#if defined(ARDUINO)
+#if defined(ARDUINO) 
 char *Request::getHeader(const __FlashStringHelper *key) const { return headers.find(key); }
 #endif
 
