@@ -86,17 +86,17 @@ bool WiFiSecureServer::setupSSLContext() {
   // Optional: Disable client authentication (we're a server, don't need client certs)
   mbedtls_ssl_conf_authmode(&sslConf, MBEDTLS_SSL_VERIFY_NONE);
   // Optimize for low memory: disable session tickets and cache
-  mbedtls_ssl_conf_session_tickets(&sslConf, MBEDTLS_SSL_SESSION_TICKETS_DISABLED);
+  /*mbedtls_ssl_conf_session_tickets(&sslConf, MBEDTLS_SSL_SESSION_TICKETS_DISABLED);
   mbedtls_ssl_conf_session_cache(&sslConf, NULL, NULL, NULL);
   
-  /*
+  
   const int ciphersuites[] = { 
     MBEDTLS_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
     MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
     MBEDTLS_TLS_RSA_WITH_AES_256_GCM_SHA384,
     0 };
-  mbedtls_ssl_conf_ciphersuites(&sslConf, ciphersuites);*/
-  mbedtls_ssl_conf_max_frag_len(&sslConf, MBEDTLS_SSL_MAX_FRAG_LEN_512);
+  mbedtls_ssl_conf_ciphersuites(&sslConf, ciphersuites);
+  mbedtls_ssl_conf_max_frag_len(&sslConf, MBEDTLS_SSL_MAX_FRAG_LEN_512);*/
   return true;
 }
 
