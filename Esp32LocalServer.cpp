@@ -80,23 +80,44 @@ bool WiFiSecureServer::setupSSLContext() {
     OTF_DEBUG("mbedtls_ssl_config_defaults failed: -0x%x\n", -ret);
     return false;
   }
+
+  // Enforce TLS 1.3 only
+  #if defined(MBEDTLS_SSL_PROTO_TLS1_3)
+    mbedtls_ssl_conf_min_version(&sslConf, MBEDTLS_SSL_MAJOR_VERSION_3, MBEDTLS_SSL_MINOR_VERSION_4);
+    mbedtls_ssl_conf_max_version(&sslConf, MBEDTLS_SSL_MAJOR_VERSION_3, MBEDTLS_SSL_MINOR_VERSION_4);
+  #else
+    OTF_DEBUG("TLS 1.3 is not compiled in (MBEDTLS_SSL_PROTO_TLS1_3 missing).\n");
+    return false;
+  #endif
   
   // Set random number generator
   mbedtls_ssl_conf_rng(&sslConf, mbedtls_ctr_drbg_random, &ctrDrbg);
-  // Optional: Disable client authentication (we're a server, don't need client certs)
+  // Disable client authentication (we're a server, don't need client certs)
   mbedtls_ssl_conf_authmode(&sslConf, MBEDTLS_SSL_VERIFY_NONE);
-  // Optimize for low memory: disable session tickets and cache
-  /*mbedtls_ssl_conf_session_tickets(&sslConf, MBEDTLS_SSL_SESSION_TICKETS_DISABLED);
-  mbedtls_ssl_conf_session_cache(&sslConf, NULL, NULL, NULL);
   
+  // Critical memory optimizations for ESP32
+  #if defined(MBEDTLS_SSL_SESSION_TICKETS)
+    mbedtls_ssl_conf_session_tickets(&sslConf, MBEDTLS_SSL_SESSION_TICKETS_DISABLED);
+  #endif
   
-  const int ciphersuites[] = { 
-    MBEDTLS_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-    MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-    MBEDTLS_TLS_RSA_WITH_AES_256_GCM_SHA384,
-    0 };
-  mbedtls_ssl_conf_ciphersuites(&sslConf, ciphersuites);
-  mbedtls_ssl_conf_max_frag_len(&sslConf, MBEDTLS_SSL_MAX_FRAG_LEN_512);*/
+  // Let mbedTLS choose cipher suites automatically based on what's compiled in
+  // Do NOT call mbedtls_ssl_conf_ciphersuites() - use defaults
+  // Arduino ESP32 has limited cipher suites compiled, explicit config often fails
+  
+  // Reduce fragment size to save memory (512 bytes instead of default 16KB)
+  mbedtls_ssl_conf_max_frag_len(&sslConf, MBEDTLS_SSL_MAX_FRAG_LEN_512);
+  
+  // Reduce read timeout for faster error detection
+  mbedtls_ssl_conf_read_timeout(&sslConf, 3000);
+
+  // Further runtime feature trimming (even if compiled in)
+  #if defined(MBEDTLS_SSL_RENEGOTIATION)
+    mbedtls_ssl_conf_renegotiation(&sslConf, MBEDTLS_SSL_RENEGOTIATION_DISABLED);
+  #endif
+  #if defined(MBEDTLS_SSL_CERT_REQ_CA_LIST)
+    mbedtls_ssl_conf_cert_req_ca_list(&sslConf, MBEDTLS_SSL_CERT_REQ_CA_LIST_DISABLED);
+  #endif
+  
   return true;
 }
 
@@ -105,6 +126,8 @@ bool WiFiSecureServer::setupCertificate() {
   
   OTF_DEBUG("Loading certificate: %d bytes\n", certLength);
   OTF_DEBUG("Loading private key: %d bytes\n", keyLength);
+  OTF_DEBUG("setupCertificate: before parse: heap=%d bytes, largest block=%d bytes\n",
+            ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   
   // Parse certificate (DER format)
   ret = mbedtls_x509_crt_parse_der(&serverCert, certData, certLength);
@@ -113,6 +136,8 @@ bool WiFiSecureServer::setupCertificate() {
     return false;
   }
   OTF_DEBUG("Certificate parsed successfully\n");
+  OTF_DEBUG("setupCertificate: after cert: heap=%d bytes, largest block=%d bytes\n",
+            ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   
   // Parse private key (DER format)
   // Try parsing without RNG first (simpler, works for unencrypted keys)
@@ -128,6 +153,8 @@ bool WiFiSecureServer::setupCertificate() {
     }
   }
   OTF_DEBUG("Private key parsed successfully\n");
+  OTF_DEBUG("setupCertificate: after key: heap=%d bytes, largest block=%d bytes\n",
+            ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   
   // Set certificate and key in SSL config
   ret = mbedtls_ssl_conf_own_cert(&sslConf, &serverCert, &serverKey);
@@ -236,6 +263,11 @@ mbedtls_ssl_context* WiFiSecureServer::handshakeSSL(WiFiClient* wifiClient) {
     delay(10);
   }
   
+  // Handshake complete: log negotiated parameters
+  OTF_DEBUG("TLS negotiated: %s, cipher=%s\n",
+            mbedtls_ssl_get_version(ssl),
+            mbedtls_ssl_get_ciphersuite(ssl));
+  
   OTF_DEBUG("SSL handshake successful!\n");
 
   return ssl;
@@ -281,13 +313,17 @@ void Esp32LocalServer::begin() {
 }
 
 LocalClient *Esp32LocalServer::acceptClient() {
-  // Cleanup previous client
+  // Cleanup previous client to free memory before accepting new connections
+  // This reduces heap fragmentation by ensuring SSL resources are freed
   if (activeClient != nullptr) {
     delete activeClient;
     activeClient = nullptr;
+    
+    // Give system time to fully cleanup memory
+    delay(10);
   }
 
-  // Check HTTP server first
+  // Check HTTP server first (less memory intensive)
   WiFiClient httpClient = httpServer.accept();
   if (httpClient) {
     OTF_DEBUG("HTTP client connected\n");
@@ -295,8 +331,15 @@ LocalClient *Esp32LocalServer::acceptClient() {
     return activeClient;
   }
 
-  // Check HTTPS server
+  // Check HTTPS server only if we have enough free memory
   if (httpsServer) {
+    // Check if we have sufficient free heap for SSL handshake (min ~20KB recommended)
+    size_t freeHeap = ESP.getFreeHeap();
+    if (freeHeap < 20000) {
+      OTF_DEBUG("Insufficient heap for HTTPS (%d bytes), skipping\n", freeHeap);
+      return nullptr;
+    }
+    
     WiFiClient wifiClient = httpsServer->accept();
     if (wifiClient) {
       OTF_DEBUG("HTTPS WiFiClient accepted, connected: %d\n", wifiClient.connected());
