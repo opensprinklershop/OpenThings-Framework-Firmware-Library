@@ -128,6 +128,9 @@ namespace OTF {
 
     /** Returns the number of milliseconds since there was last a change in the cloud status. */
     unsigned long getTimeSinceLastCloudStatusChange();
+    
+    /** Returns a pointer to the local server instance. */
+    LOCAL_SERVER_CLASS* getServer() { return &localServer; }
   };
 }// namespace OTF
 

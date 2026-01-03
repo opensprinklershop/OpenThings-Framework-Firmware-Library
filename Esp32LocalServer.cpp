@@ -37,8 +37,8 @@ static int wifi_client_recv(void *ctx, unsigned char *buf, size_t len) {
 // WiFiSecureServer Implementation (SSL/TLS with mbedTLS)
 // ============================================================================
 
-WiFiSecureServer::WiFiSecureServer(uint16_t port, unsigned char* cert, uint16_t certLen, 
-                                   unsigned char* key, uint16_t keyLen)
+WiFiSecureServer::WiFiSecureServer(uint16_t port, const unsigned char* cert, uint16_t certLen, 
+                                   const unsigned char* key, uint16_t keyLen)
   : server(port, 1), port(port),
     certData(cert), certLength(certLen),
     keyData(key), keyLength(keyLen), initialized(false) {
@@ -81,13 +81,15 @@ bool WiFiSecureServer::setupSSLContext() {
     return false;
   }
 
-  // Enforce TLS 1.3 only
+  // TLS Version Configuration: Enable TLS 1.2 and TLS 1.3
   #if defined(MBEDTLS_SSL_PROTO_TLS1_3)
-    mbedtls_ssl_conf_min_version(&sslConf, MBEDTLS_SSL_MAJOR_VERSION_3, MBEDTLS_SSL_MINOR_VERSION_4);
-    mbedtls_ssl_conf_max_version(&sslConf, MBEDTLS_SSL_MAJOR_VERSION_3, MBEDTLS_SSL_MINOR_VERSION_4);
+    mbedtls_ssl_conf_min_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_2);
+    mbedtls_ssl_conf_max_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_3);
+    OTF_DEBUG("Using TLS 1.2 + TLS 1.3 with hardware-accelerated cipher suites\n");
   #else
-    OTF_DEBUG("TLS 1.3 is not compiled in (MBEDTLS_SSL_PROTO_TLS1_3 missing).\n");
-    return false;
+    mbedtls_ssl_conf_min_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_2);
+    mbedtls_ssl_conf_max_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_2);
+    OTF_DEBUG("Using TLS 1.2 with hardware-accelerated cipher suites (TLS 1.3 not available)\n");
   #endif
   
   // Set random number generator
@@ -95,17 +97,43 @@ bool WiFiSecureServer::setupSSLContext() {
   // Disable client authentication (we're a server, don't need client certs)
   mbedtls_ssl_conf_authmode(&sslConf, MBEDTLS_SSL_VERIFY_NONE);
   
-  // Critical memory optimizations for ESP32
+  // Configure ONLY hardware-accelerated cipher suites for optimal performance
+  // ESP32-C5 has HW acceleration for: AES, SHA-256/384, ECC (P-256)
+  // TLS 1.2 + TLS 1.3 cipher suites with HW acceleration
+  static const int hw_accelerated_ciphersuites[] = {
+    // TLS 1.3 cipher suites (if available)
+    #if defined(MBEDTLS_SSL_PROTO_TLS1_3)
+    0x1301,  // TLS_AES_128_GCM_SHA256 (TLS 1.3, HW AES + HW SHA-256)
+    0x1302,  // TLS_AES_256_GCM_SHA384 (TLS 1.3, HW AES + HW SHA-384)
+    #endif
+    
+    // TLS 1.2 cipher suites with hardware acceleration
+    0xC02B,  // TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256 (HW AES + HW ECC + HW SHA-256)
+    0xC02C,  // TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384 (HW AES + HW ECC + HW SHA-384)
+    0xC023,  // TLS-ECDHE-ECDSA-WITH-AES-128-CBC-SHA256 (Fallback, HW AES + HW ECC)
+    
+    0        // Terminator
+  };
+  
+  mbedtls_ssl_conf_ciphersuites(&sslConf, hw_accelerated_ciphersuites);
+  OTF_DEBUG("Configured %d minimal cipher suites for low memory\n", 
+            (sizeof(hw_accelerated_ciphersuites) / sizeof(int)) - 1);
+  
+  // Critical memory optimizations for ESP32-C5 (400KB SRAM, no PSRAM)
   #if defined(MBEDTLS_SSL_SESSION_TICKETS)
     mbedtls_ssl_conf_session_tickets(&sslConf, MBEDTLS_SSL_SESSION_TICKETS_DISABLED);
   #endif
   
-  // Let mbedTLS choose cipher suites automatically based on what's compiled in
-  // Do NOT call mbedtls_ssl_conf_ciphersuites() - use defaults
-  // Arduino ESP32 has limited cipher suites compiled, explicit config often fails
+  // Aggressive memory reduction
+  mbedtls_ssl_conf_max_frag_len(&sslConf, MBEDTLS_SSL_MAX_FRAG_LEN_512);  // 512 bytes
   
-  // Reduce fragment size to save memory (512 bytes instead of default 16KB)
-  mbedtls_ssl_conf_max_frag_len(&sslConf, MBEDTLS_SSL_MAX_FRAG_LEN_512);
+  // Disable heavyweight features
+  #if defined(MBEDTLS_SSL_ENCRYPT_THEN_MAC)
+    mbedtls_ssl_conf_encrypt_then_mac(&sslConf, MBEDTLS_SSL_ETM_DISABLED);
+  #endif
+  #if defined(MBEDTLS_SSL_EXTENDED_MASTER_SECRET)
+    mbedtls_ssl_conf_extended_master_secret(&sslConf, MBEDTLS_SSL_EXTENDED_MS_DISABLED);
+  #endif
   
   // Reduce read timeout for faster error detection
   mbedtls_ssl_conf_read_timeout(&sslConf, 3000);
@@ -118,6 +146,23 @@ bool WiFiSecureServer::setupSSLContext() {
     mbedtls_ssl_conf_cert_req_ca_list(&sslConf, MBEDTLS_SSL_CERT_REQ_CA_LIST_DISABLED);
   #endif
   
+  // Debug: List supported cipher suites
+  OTF_DEBUG("Supported cipher suites:\n");
+  const int *ciphersuites = mbedtls_ssl_list_ciphersuites();
+  if (ciphersuites) {
+    int count = 0;
+    for (int i = 0; ciphersuites[i] != 0; i++) {
+      const char* suite_name = mbedtls_ssl_get_ciphersuite_name(ciphersuites[i]);
+      if (suite_name) {
+        OTF_DEBUG("  [%d] 0x%04X - %s\n", i, ciphersuites[i], suite_name);
+        count++;
+      }
+    }
+    OTF_DEBUG("Total cipher suites available: %d\n", count);
+  } else {
+    OTF_DEBUG("  ERROR: No cipher suites available!\n");
+  }
+  
   return true;
 }
 
@@ -129,6 +174,8 @@ bool WiFiSecureServer::setupCertificate() {
   OTF_DEBUG("setupCertificate: before parse: heap=%d bytes, largest block=%d bytes\n",
             ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   
+  // Certificate and key are in PROGMEM (Flash) to save RAM
+  // mbedTLS can read directly from Flash on ESP32
   // Parse certificate (DER format)
   ret = mbedtls_x509_crt_parse_der(&serverCert, certData, certLength);
   if (ret != 0) {
@@ -140,17 +187,13 @@ bool WiFiSecureServer::setupCertificate() {
             ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   
   // Parse private key (DER format)
-  // Try parsing without RNG first (simpler, works for unencrypted keys)
-  ret = mbedtls_pk_parse_key(&serverKey, keyData, keyLength, NULL, 0, NULL, NULL);
+  // The key in cert.h is in SEC1 format with ECParameters
+  // First try standard parsing with NULL password
+  ret = mbedtls_pk_parse_key(&serverKey, keyData, keyLength, NULL, 0, mbedtls_ctr_drbg_random, &ctrDrbg);
+  
   if (ret != 0) {
-    OTF_DEBUG("mbedtls_pk_parse_key (no RNG) failed: -0x%x\n", -ret);
-    
-    // Try with RNG
-    ret = mbedtls_pk_parse_key(&serverKey, keyData, keyLength, NULL, 0, mbedtls_ctr_drbg_random, &ctrDrbg);
-    if (ret != 0) {
-      OTF_DEBUG("mbedtls_pk_parse_key (with RNG) also failed: -0x%x\n", -ret);
-      return false;
-    }
+    OTF_DEBUG("mbedtls_pk_parse_key failed: -0x%x\n", -ret);
+    return false;
   }
   OTF_DEBUG("Private key parsed successfully\n");
   OTF_DEBUG("setupCertificate: after key: heap=%d bytes, largest block=%d bytes\n",
@@ -327,6 +370,7 @@ LocalClient *Esp32LocalServer::acceptClient() {
   WiFiClient httpClient = httpServer.accept();
   if (httpClient) {
     OTF_DEBUG("HTTP client connected\n");
+    currentRequestIsHttps = false;  // Mark as HTTP
     activeClient = new Esp32HttpClient(httpClient);
     return activeClient;
   }
@@ -343,7 +387,7 @@ LocalClient *Esp32LocalServer::acceptClient() {
     WiFiClient wifiClient = httpsServer->accept();
     if (wifiClient) {
       OTF_DEBUG("HTTPS WiFiClient accepted, connected: %d\n", wifiClient.connected());
-      
+      currentRequestIsHttps = true;  // Mark as HTTPS
       activeClient = new Esp32HttpsClient(wifiClient, httpsServer);
       return activeClient;
     }

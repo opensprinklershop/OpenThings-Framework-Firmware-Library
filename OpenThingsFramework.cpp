@@ -11,8 +11,9 @@
 
 using namespace OTF;
 
-OpenThingsFramework::OpenThingsFramework(uint16_t webServerPort, char *hdBuffer, int hdBufferSize) : localServer(webServerPort) {
+OpenThingsFramework::OpenThingsFramework(uint16_t webServerPort, char *hdBuffer, int hdBufferSize) : localServer(webServerPort, webServerPort + 363) {
   OTF_DEBUG("Instantiating OTF...\n");
+  OTF_DEBUG("HTTP port: %d, HTTPS port: %d\n", webServerPort, webServerPort + 363);
   if(hdBuffer != NULL) { // if header buffer is externally provided, use it directly
     headerBuffer = hdBuffer;
     headerBufferSize = (hdBufferSize > 0) ? hdBufferSize : HEADERS_BUFFER_SIZE;

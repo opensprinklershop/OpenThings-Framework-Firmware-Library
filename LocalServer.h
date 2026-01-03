@@ -58,6 +58,9 @@ namespace OTF {
 
     /** Starts listening for connections. */
     virtual void begin() = 0;
+    
+    /** Returns true if the current request is HTTPS/secure, false for HTTP. */
+    virtual bool isCurrentRequestHttps() const { return false; }
   };
 }// namespace OTF
 

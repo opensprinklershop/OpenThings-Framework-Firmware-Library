@@ -53,6 +53,7 @@ namespace OTF {
      */
     #if defined(ARDUINO)
     void writeHeader(const __FlashStringHelper *const name, const __FlashStringHelper *const value);
+    void writeHeader(const __FlashStringHelper *const name, const char *const value);
     void writeHeader(const __FlashStringHelper *const name, int value);
     #else
     void writeHeader(const char *name, const char *const value);

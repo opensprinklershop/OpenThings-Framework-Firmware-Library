@@ -32,9 +32,9 @@ private:
   mbedtls_entropy_context entropy;
   mbedtls_ctr_drbg_context ctrDrbg;
   uint16_t port;
-  unsigned char* certData;
+  const unsigned char* certData;
   uint16_t certLength;
-  unsigned char* keyData;
+  const unsigned char* keyData;
   uint16_t keyLength;
   bool initialized;
 
@@ -42,7 +42,7 @@ private:
   bool setupCertificate();
 
 public:
-  WiFiSecureServer(uint16_t port, unsigned char* cert, uint16_t certLen, unsigned char* key, uint16_t keyLen);
+  WiFiSecureServer(uint16_t port, const unsigned char* cert, uint16_t certLen, const unsigned char* key, uint16_t keyLen);
   ~WiFiSecureServer();
   
   bool begin();
@@ -108,12 +108,14 @@ public:
     LocalClient *activeClient = nullptr;
     uint16_t httpPort;
     uint16_t httpsPort;
+    bool currentRequestIsHttps = false; // Flag for current request type
 
   public:
     Esp32LocalServer(uint16_t port = 80, uint16_t httpsPort = 443);
 
     LocalClient *acceptClient();
     void begin();
+    bool isCurrentRequestHttps() const override { return currentRequestIsHttps; }
   };
 }// namespace OTF
 

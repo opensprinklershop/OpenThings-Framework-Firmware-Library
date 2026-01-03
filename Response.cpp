@@ -87,6 +87,16 @@ void Response::writeHeader(const __FlashStringHelper *const name, const __FlashS
 
   bprintf(F("%s: %s\r\n"), name, value);
 }
+
+void Response::writeHeader(const __FlashStringHelper *const name, const char *const value) {
+  if (responseStatus < STATUS_WRITTEN || responseStatus > HEADERS_WRITTEN) {
+    valid = false;
+    return;
+  }
+  responseStatus = HEADERS_WRITTEN;
+
+  bprintf(F("%s: %s\r\n"), name, value);
+}
 #else
 void Response::writeHeader(const char *name, int value) {
   if (responseStatus < STATUS_WRITTEN || responseStatus > HEADERS_WRITTEN) {
