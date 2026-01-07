@@ -97,17 +97,11 @@ bool WiFiSecureServer::setupSSLContext() {
   // Disable client authentication (we're a server, don't need client certs)
   mbedtls_ssl_conf_authmode(&sslConf, MBEDTLS_SSL_VERIFY_NONE);
   
-  // Configure ONLY hardware-accelerated cipher suites for optimal performance
+  // Configure ONLY hardware-accelerated TLS 1.2 cipher suites for optimal performance
   // ESP32-C5 has HW acceleration for: AES, SHA-256/384, ECC (P-256)
-  // TLS 1.2 + TLS 1.3 cipher suites with HW acceleration
+  // Limited to 3 minimal cipher suites for maximum compatibility and low memory usage
   static const int hw_accelerated_ciphersuites[] = {
-    // TLS 1.3 cipher suites (if available)
-    #if defined(MBEDTLS_SSL_PROTO_TLS1_3)
-    0x1301,  // TLS_AES_128_GCM_SHA256 (TLS 1.3, HW AES + HW SHA-256)
-    0x1302,  // TLS_AES_256_GCM_SHA384 (TLS 1.3, HW AES + HW SHA-384)
-    #endif
-    
-    // TLS 1.2 cipher suites with hardware acceleration
+    // TLS 1.2 cipher suites with hardware acceleration (ONLY these 3)
     0xC02B,  // TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256 (HW AES + HW ECC + HW SHA-256)
     0xC02C,  // TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384 (HW AES + HW ECC + HW SHA-384)
     0xC023,  // TLS-ECDHE-ECDSA-WITH-AES-128-CBC-SHA256 (Fallback, HW AES + HW ECC)
@@ -147,7 +141,7 @@ bool WiFiSecureServer::setupSSLContext() {
   #endif
   
   // Debug: List supported cipher suites
-  OTF_DEBUG("Supported cipher suites:\n");
+  /*OTF_DEBUG("Supported cipher suites:\n");
   const int *ciphersuites = mbedtls_ssl_list_ciphersuites();
   if (ciphersuites) {
     int count = 0;
@@ -162,7 +156,7 @@ bool WiFiSecureServer::setupSSLContext() {
   } else {
     OTF_DEBUG("  ERROR: No cipher suites available!\n");
   }
-  
+  */
   return true;
 }
 
@@ -361,9 +355,6 @@ LocalClient *Esp32LocalServer::acceptClient() {
   if (activeClient != nullptr) {
     delete activeClient;
     activeClient = nullptr;
-    
-    // Give system time to fully cleanup memory
-    delay(10);
   }
 
   // Check HTTP server first (less memory intensive)
@@ -376,14 +367,7 @@ LocalClient *Esp32LocalServer::acceptClient() {
   }
 
   // Check HTTPS server only if we have enough free memory
-  if (httpsServer) {
-    // Check if we have sufficient free heap for SSL handshake (min ~20KB recommended)
-    size_t freeHeap = ESP.getFreeHeap();
-    if (freeHeap < 20000) {
-      OTF_DEBUG("Insufficient heap for HTTPS (%d bytes), skipping\n", freeHeap);
-      return nullptr;
-    }
-    
+  if (httpsServer) {    
     WiFiClient wifiClient = httpsServer->accept();
     if (wifiClient) {
       OTF_DEBUG("HTTPS WiFiClient accepted, connected: %d\n", wifiClient.connected());

@@ -4,6 +4,9 @@
 #if defined(ARDUINO)
 #include <Arduino.h>
 #include <WebSocketsClient.h>
+#if defined(ESP32)
+#include <WiFi.h>
+#endif
 typedef String WSInterfaceString;
 #else
 #include <tiny_websockets/client.hpp>

@@ -30,14 +30,14 @@
 
 namespace OTF {
 
-  enum HTTPMethod {
-    HTTP_ANY,
-    HTTP_GET,
-    HTTP_POST,
-    HTTP_PUT,
-    HTTP_PATCH,
-    HTTP_DELETE,
-    HTTP_OPTIONS
+  enum OTFHTTPMethod {
+    OTF_HTTP_ANY,
+    OTF_HTTP_GET,
+    OTF_HTTP_POST,
+    OTF_HTTP_PUT,
+    OTF_HTTP_PATCH,
+    OTF_HTTP_DELETE,
+    OTF_HTTP_OPTIONS
   };
 
   enum RequestType {
@@ -49,7 +49,7 @@ namespace OTF {
     friend class OpenThingsFramework;
 
   private:
-    enum HTTPMethod httpMethod;
+    enum OTFHTTPMethod httpMethod;
     char *httpVersion = nullptr;
     char *path = nullptr;
     LinkedMap<char *> queryParams;

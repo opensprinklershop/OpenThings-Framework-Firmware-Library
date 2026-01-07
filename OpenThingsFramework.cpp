@@ -69,17 +69,17 @@ OpenThingsFramework::OpenThingsFramework(uint16_t webServerPort, const char* web
   webSocket->enableHeartbeat(15000, 5000, 1);
 }
 
-char *makeMapKey(StringBuilder *sb, HTTPMethod method, const char *path) {
+char *makeMapKey(StringBuilder *sb, OTFHTTPMethod method, const char *path) {
   sb->bprintf(F("%d%s"), method, path);
   return sb->toString();
 }
 
-void OpenThingsFramework::on(const char *path, callback_t callback, HTTPMethod method) {
+void OpenThingsFramework::on(const char *path, callback_t callback, OTFHTTPMethod method) {
   callbacks.add(makeMapKey(new StringBuilder(KEY_MAX_LENGTH), method, path), callback);
 }
 
 #if defined(ARDUINO)
-void OpenThingsFramework::on(const __FlashStringHelper *path, callback_t callback, HTTPMethod method) {
+void OpenThingsFramework::on(const __FlashStringHelper *path, callback_t callback, OTFHTTPMethod method) {
   callbacks.add(makeMapKey(new StringBuilder(KEY_MAX_LENGTH), method, (char *) path), callback);
 }
 #endif
@@ -242,6 +242,12 @@ void OpenThingsFramework::loop() {
   }
 }
 
+void OpenThingsFramework::pollCloud() {
+  if (webSocket != nullptr) {
+    webSocket->poll();
+  }
+}
+
 void OpenThingsFramework::webSocketEventCallback(WSEvent_t type, uint8_t *payload, size_t length) {
   switch (type) {
     case WSEvent_DISCONNECTED: {
@@ -358,7 +364,7 @@ void OpenThingsFramework::fillResponse(const Request &req, Response &res) {
     delete sb;
     sb = new StringBuilder(KEY_MAX_LENGTH);
 
-    callback = callbacks.find(makeMapKey(sb, HTTP_ANY, req.getPath()));
+    callback = callbacks.find(makeMapKey(sb, OTF_HTTP_ANY, req.getPath()));
   }
 
   delete sb;

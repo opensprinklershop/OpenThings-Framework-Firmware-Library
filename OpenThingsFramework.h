@@ -106,7 +106,7 @@ namespace OTF {
      * @param path
      * @param callback
      */
-    void on(const char *path, callback_t callback, HTTPMethod method = HTTP_ANY);
+    void on(const char *path, callback_t callback, OTFHTTPMethod method = OTF_HTTP_ANY);
 
 #if defined(ARDUINO)
     /**
@@ -115,13 +115,19 @@ namespace OTF {
      * @param path
      * @param callback
      */
-    void on(const __FlashStringHelper *path, callback_t callback, HTTPMethod method = HTTP_ANY);
+    void on(const __FlashStringHelper *path, callback_t callback, OTFHTTPMethod method = OTF_HTTP_ANY);
 #endif
 
     /** Registers a callback function to run when a request is received but its path does not match a registered callback. */
     void onMissingPage(callback_t callback);
 
     void loop();
+
+    /**
+     * Polls only the cloud websocket (if enabled).
+     * Useful when local request handling blocks for a while and websocket heartbeats must still be serviced.
+     */
+    void pollCloud();
 
     /** Returns the current status of the connection to the OpenThings Cloud server. */
     CLOUD_STATUS getCloudStatus();

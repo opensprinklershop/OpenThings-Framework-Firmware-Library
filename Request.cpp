@@ -32,17 +32,17 @@ Request::Request(char *str, size_t length, bool cloudRequest) {
 
   // Map the string to an enum value.
   if (strcmp("GET", str) == 0) {
-    this->httpMethod = HTTP_GET;
+    this->httpMethod = OTF_HTTP_GET;
   } else if (strcmp("POST", str) == 0) {
-    this->httpMethod = HTTP_POST;
+    this->httpMethod = OTF_HTTP_POST;
   } else if (strcmp("PUT", str) == 0) {
-    this->httpMethod = HTTP_PUT;
+    this->httpMethod = OTF_HTTP_PUT;
   } else if (strcmp("DELETE", str) == 0) {
-    this->httpMethod = HTTP_DELETE;
+    this->httpMethod = OTF_HTTP_DELETE;
   } else if (strcmp("OPTIONS", str) == 0) {
-    this->httpMethod = HTTP_OPTIONS;
+    this->httpMethod = OTF_HTTP_OPTIONS;
   } else if (strcmp("PATCH", str) == 0) {
-    this->httpMethod = HTTP_PATCH;
+    this->httpMethod = OTF_HTTP_PATCH;
   } else {
     REQ_DEBUG(F("Could not match HTTP method\n"));
     // Error if the method isn't a standard method.
