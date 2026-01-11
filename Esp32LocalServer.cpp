@@ -242,6 +242,18 @@ mbedtls_ssl_context* WiFiSecureServer::handshakeSSL(WiFiClient* wifiClient) {
     OTF_DEBUG("Invalid or disconnected WiFiClient\n");
     return NULL;
   }
+
+  // Fast-path: if the peer sent data already and it doesn't look like a TLS record
+  // (TLS record content type for handshake is 0x16), it's likely plain HTTP on the HTTPS port.
+  int avail = wifiClient->available();
+  if (avail > 0) {
+    int first = wifiClient->peek();
+    if (first >= 0 && first != 0x16) {
+      OTF_DEBUG("Non-TLS traffic on HTTPS port (first byte=0x%02x, avail=%d). Closing.\n", first, avail);
+      wifiClient->stop();
+      return NULL;
+    }
+  }
   
   OTF_DEBUG("handshakeSSL: Free heap: %d bytes, largest block: %d bytes\n", 
                 ESP.getFreeHeap(), ESP.getMaxAllocHeap());
@@ -269,6 +281,7 @@ mbedtls_ssl_context* WiFiSecureServer::handshakeSSL(WiFiClient* wifiClient) {
     OTF_DEBUG("Free heap: %d bytes\n", ESP.getFreeHeap());
     mbedtls_ssl_free(ssl);
     delete ssl;
+    wifiClient->stop();
     return NULL;
   }
 
@@ -280,11 +293,17 @@ mbedtls_ssl_context* WiFiSecureServer::handshakeSSL(WiFiClient* wifiClient) {
 
   while ((ret = mbedtls_ssl_handshake(ssl)) != 0) {
     if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
-      char errBuf[100];
-      mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-      OTF_DEBUG("mbedtls_ssl_handshake failed: -0x%x (%s)\n", -ret, errBuf);
+      // mbedTLS net errors are small negative codes (e.g. -0x0050 for connection reset)
+      if (ret == MBEDTLS_ERR_NET_CONN_RESET) {
+        OTF_DEBUG("mbedtls_ssl_handshake failed: -0x%x (CONNECTION RESET)\n", -ret);
+      } else {
+        char errBuf[100];
+        mbedtls_strerror(ret, errBuf, sizeof(errBuf));
+        OTF_DEBUG("mbedtls_ssl_handshake failed: -0x%x (%s)\n", -ret, errBuf);
+      }
       mbedtls_ssl_free(ssl);
       delete ssl;
+      wifiClient->stop();
       return NULL;
     }
     
@@ -293,6 +312,7 @@ mbedtls_ssl_context* WiFiSecureServer::handshakeSSL(WiFiClient* wifiClient) {
       OTF_DEBUG("SSL handshake timeout!\n");
       mbedtls_ssl_free(ssl);
       delete ssl;
+      wifiClient->stop();
       return NULL;
     }
     
@@ -373,6 +393,14 @@ LocalClient *Esp32LocalServer::acceptClient() {
       OTF_DEBUG("HTTPS WiFiClient accepted, connected: %d\n", wifiClient.connected());
       currentRequestIsHttps = true;  // Mark as HTTPS
       activeClient = new Esp32HttpsClient(wifiClient, httpsServer);
+
+      // If the TLS handshake failed, don't return a client that will never produce data.
+      // This avoids OTF's localServerLoop waiting until timeout for a dead session.
+      if (!static_cast<Esp32HttpsClient*>(activeClient)->isUsable()) {
+        delete activeClient;
+        activeClient = nullptr;
+        return nullptr;
+      }
       return activeClient;
     }
   }

@@ -89,6 +89,7 @@ public:
     ~Esp32HttpsClient();
 
   public:
+    bool isUsable() const { return ssl != nullptr && isActive; }
     bool dataAvailable();
     size_t readBytes(char *buffer, size_t length);
     size_t readBytesUntil(char terminator, char *buffer, size_t length);

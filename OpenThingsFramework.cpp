@@ -125,33 +125,52 @@ void OpenThingsFramework::localServerLoop() {
 
   char *buffer = headerBuffer;
   size_t length = 0;
-  while (localClient->dataAvailable()&&millis()<timeout) {
-    if (length >= (size_t)headerBufferSize) {
+  while (millis() < timeout) {
+    if (length >= (size_t)headerBufferSize - 1) {
       localClient->print(F("HTTP/1.1 413 Request too large\r\n\r\nThe request was too large"));
       // Get a new client to indicate that the previous client is no longer needed.
       localClient = localServer.acceptClient();
       return;
     }
 
-    size_t size = 
+    // `dataAvailable()` can temporarily return false between TCP packets.
+    // Keep waiting (up to WIFI_CONNECTION_TIMEOUT) until the full header terminator is received.
+    if (!localClient->dataAvailable()) {
+      #if defined(ARDUINO)
+      delay(1);
+      #endif
+      continue;
+    }
+
+    size_t size =
     #if defined(ARDUINO)
     min
     #else
     std::min
     #endif
-    ((int) (headerBufferSize - length - 1), headerBufferSize);
-    
+    ((int)(headerBufferSize - length - 1), 256);
+
     size_t read = localClient->readBytesUntil('\n', &buffer[length], size);
+    if (read == 0) {
+      continue;
+    }
+
     char rc = buffer[length];
     length += read;
     buffer[length++] = '\n';
-    if(read==1 && rc=='\r') { break; }
+
+    if (read == 1 && rc == '\r') {
+      break;
+    }
+    if (length >= 4 && strncmp_P(&buffer[length - 4], (char *)F("\r\n\r\n"), 4) == 0) {
+      break;
+    }
   }
   OTF_DEBUG((char *) F("Finished reading data from client. Request line + headers were %d bytes\n"), length);
   buffer[length] = 0;
 
   // Make sure that the headers were fully read into the buffer.
-  if (strncmp_P(&buffer[length - 4], (char *) F("\r\n\r\n"), 4) != 0) {
+  if (length < 4 || strncmp_P(&buffer[length - 4], (char *) F("\r\n\r\n"), 4) != 0) {
     OTF_DEBUG(F("The request headers were not fully read into the buffer.\n"));
     localClient->print(F("HTTP/1.1 413 Request too large\r\n\r\nThe request was too large"));
     return;
