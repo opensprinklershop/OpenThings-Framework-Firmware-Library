@@ -19,6 +19,7 @@ static int wifi_client_send(void *ctx, const unsigned char *buf, size_t len) {
   WiFiClient *client = static_cast<WiFiClient*>(ctx);
   if (!client || !client->connected()) return MBEDTLS_ERR_NET_CONN_RESET;
   int written = client->write(buf, len);
+  if (written == 0) return MBEDTLS_ERR_SSL_WANT_WRITE;
   if (written < 0) return MBEDTLS_ERR_NET_SEND_FAILED;
   return written;
 }
@@ -516,17 +517,33 @@ size_t Esp32HttpsClient::readBytesUntil(char terminator, char *buffer, size_t le
 }
 
 void Esp32HttpsClient::print(const char *data) {
-  mbedtls_ssl_write(ssl, (const unsigned char*)data, strlen(data));
+  if (!data) return;
+  write(data, strlen(data));
 }
 
 void Esp32HttpsClient::print(const __FlashStringHelper *data) {
   const char* p = reinterpret_cast<const char*>(data);
-  mbedtls_ssl_write(ssl, (const unsigned char*)p, strlen(p));
+  write(p, strlen(p));
 }
 
 size_t Esp32HttpsClient::write(const char *buffer, size_t length) {
-  int bytesWritten = mbedtls_ssl_write(ssl, (const unsigned char*)buffer, length);
-  return (bytesWritten > 0) ? bytesWritten : 0;
+  if (!ssl || !buffer || length == 0) return 0;
+  uint32_t start = millis();
+  size_t total = 0;
+  while (total < length) {
+    int w = mbedtls_ssl_write(ssl, (const unsigned char*)buffer + total, length - total);
+    if (w > 0) {
+      total += (size_t)w;
+      continue;
+    }
+    if (w == MBEDTLS_ERR_SSL_WANT_READ || w == MBEDTLS_ERR_SSL_WANT_WRITE) {
+      if ((millis() - start) >= timeoutMs) break;
+      delay(1);
+      continue;
+    }
+    break;
+  }
+  return total;
 }
 
 int Esp32HttpsClient::peek() {
@@ -534,6 +551,8 @@ int Esp32HttpsClient::peek() {
 }
 
 void Esp32HttpsClient::setTimeout(int timeout) {
+  if (timeout < 0) timeout = 0;
+  timeoutMs = (uint32_t)timeout;
   client.setTimeout(timeout);
 }
 
