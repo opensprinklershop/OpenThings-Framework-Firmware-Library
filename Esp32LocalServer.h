@@ -84,7 +84,8 @@ public:
     WiFiClient client;           // Base WiFiClient
     mbedtls_ssl_context *ssl;
     bool isActive;
-    uint32_t timeoutMs = 1000;
+    // Used for mbedTLS read/write retry loops.
+    uint32_t timeoutMs = 5000;
 
     Esp32HttpsClient(WiFiClient wifiClient, WiFiSecureServer *httpsServer);
     ~Esp32HttpsClient();

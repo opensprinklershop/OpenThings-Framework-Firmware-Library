@@ -416,6 +416,7 @@ LocalClient *Esp32LocalServer::acceptClient() {
 Esp32HttpClient::Esp32HttpClient(WiFiClient wifiClient) 
   : client(wifiClient), isActive(true) {
   OTF_DEBUG("HTTP client initialized\n");
+  client.setNoDelay(true);
 }
 
 Esp32HttpClient::~Esp32HttpClient() {
@@ -459,9 +460,10 @@ void Esp32HttpClient::setTimeout(int timeout) {
 }
 
 void Esp32HttpClient::flush() {
-  OTF_DEBUG("HTTP flush: sending buffered data\n");
-  client.clear();
-  OTF_DEBUG("HTTP flush: complete\n");
+  // No-op.
+  // NOTE: Arduino Client::flush() is often implemented as "discard received data".
+  // Response streaming uses flush as a "push out" hint; clearing RX here can block
+  // and severely slow down large streamed responses.
 }
 
 void Esp32HttpClient::stop() {
@@ -477,6 +479,8 @@ Esp32HttpsClient::Esp32HttpsClient(WiFiClient wifiClient, WiFiSecureServer* http
   : client(wifiClient), isActive(true), ssl(nullptr)
 {
   OTF_DEBUG("initialized HTTPS client with SSL\n");
+  client.setNoDelay(true);
+  client.setTimeout((int)timeoutMs);
 
   // Create SSL connection with handshake
   ssl = httpsServer->handshakeSSL(&client);
@@ -500,18 +504,43 @@ bool Esp32HttpsClient::dataAvailable() {
 }
 
 size_t Esp32HttpsClient::readBytes(char *buffer, size_t length) {
-  int bytesRead = mbedtls_ssl_read(ssl, (unsigned char*)buffer, length);
-  return (bytesRead > 0) ? bytesRead : 0;
+  if (!ssl || !buffer || length == 0) return 0;
+  uint32_t start = millis();
+  size_t total = 0;
+  while (total < length) {
+    int r = mbedtls_ssl_read(ssl, (unsigned char*)buffer + total, length - total);
+    if (r > 0) {
+      total += (size_t)r;
+      continue;
+    }
+    if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) {
+      if ((millis() - start) >= timeoutMs) break;
+      delay(1);
+      continue;
+    }
+    break;
+  }
+  return total;
 }
 
 size_t Esp32HttpsClient::readBytesUntil(char terminator, char *buffer, size_t length) {
+  if (!ssl || !buffer || length == 0) return 0;
+  uint32_t start = millis();
   size_t index = 0;
   while (index < length) {
-    char c;
-    int bytesRead = mbedtls_ssl_read(ssl, (unsigned char*)&c, 1);
-    if (bytesRead <= 0) break;
-    if (c == terminator) break;
-    buffer[index++] = c;
+    unsigned char c;
+    int r = mbedtls_ssl_read(ssl, &c, 1);
+    if (r > 0) {
+      if ((char)c == terminator) break;
+      buffer[index++] = (char)c;
+      continue;
+    }
+    if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) {
+      if ((millis() - start) >= timeoutMs) break;
+      delay(1);
+      continue;
+    }
+    break;
   }
   return index;
 }
@@ -543,6 +572,10 @@ size_t Esp32HttpsClient::write(const char *buffer, size_t length) {
     }
     break;
   }
+  uint32_t elapsed = millis() - start;
+  if (elapsed > 50) {
+    OTF_DEBUG("HTTPS write slow: %u ms for %d bytes (sent %d)\n", elapsed, (int)length, (int)total);
+  }
   return total;
 }
 
@@ -557,13 +590,31 @@ void Esp32HttpsClient::setTimeout(int timeout) {
 }
 
 void Esp32HttpsClient::flush() {
-  client.clear();
+  // No-op.
+  // For TLS, writes are pushed via mbedtls_ssl_write(); there is no separate
+  // outbound flush. Avoid draining/clearing RX here because Response streaming
+  // can call flush frequently.
 }
 
 void Esp32HttpsClient::stop() {
   OTF_DEBUG("stop HTTPS client with SSL\n");
+  uint32_t stopStart = millis();
   if (ssl && isActive) {
-    mbedtls_ssl_close_notify(ssl);
+    // Best-effort close_notify: some browsers/clients don't read it, which can
+    // stall in WANT_WRITE for seconds. Keep it short to avoid blocking OTF loop.
+    const uint32_t closeTimeoutMs = 200;
+    uint32_t start = millis();
+    while (true) {
+      int r = mbedtls_ssl_close_notify(ssl);
+      if (r == 0) break;
+      if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) {
+        if ((millis() - start) >= closeTimeoutMs) break;
+        delay(1);
+        continue;
+      }
+      break;
+    }
+    OTF_DEBUG("HTTPS close_notify elapsed: %u ms\n", (unsigned)(millis() - start));
   }
   if (ssl) {
     mbedtls_ssl_free(ssl);
@@ -572,7 +623,7 @@ void Esp32HttpsClient::stop() {
   }
   client.stop();
   isActive = false;
-  OTF_DEBUG("SSL cleanup complete, free heap: %d bytes\n", ESP.getFreeHeap());
+  OTF_DEBUG("SSL cleanup complete, free heap: %d bytes, stop elapsed: %u ms\n", ESP.getFreeHeap(), (unsigned)(millis() - stopStart));
 }
 
 #endif
