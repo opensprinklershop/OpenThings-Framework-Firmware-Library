@@ -105,6 +105,9 @@ namespace OTF {
     /** Returns the decoded value of the specified query parameter as a null-terminated string, or NULL if the parameter was not set in the request. */
     char *getQueryParameter(const char *key) const;
 
+    /** Returns the head node of the internal query parameter map (decoded). */
+    const LinkedMapNode<char *> *getQueryParameters() const;
+
 #if defined(ARDUINO)
     /** Returns the decoded value of the specified query parameter as a null-terminated string, or NULL if the parameter was not set in the request. */
     char *getQueryParameter(const __FlashStringHelper *key) const;

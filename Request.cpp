@@ -292,6 +292,8 @@ char *Request::getQueryParameter(const __FlashStringHelper *key) const { return 
 
 char *Request::getQueryParameter(const char *key) const { return queryParams.find(key); }
 
+const LinkedMapNode<char *> *Request::getQueryParameters() const { return queryParams.headNode(); }
+
 char *Request::getHeader(const char *key) const { return headers.find(key); }
 
 #if defined(ARDUINO) 
