@@ -68,6 +68,12 @@ namespace OTF {
      */
     void writeBodyData(const char *data, size_t max_length);
 
+    /**
+     * Compatibility helper: writes formatted data to the response body.
+     * This may only be called after the status (and optionally headers) have been written.
+     */
+    void writeBodyChunk(const char *format, ...);
+
 #if defined(ARDUINO)
     void writeBodyData(const __FlashStringHelper *const data, size_t max_length);
 #endif
