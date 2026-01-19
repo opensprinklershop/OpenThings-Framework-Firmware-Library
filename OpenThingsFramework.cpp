@@ -165,15 +165,19 @@ void OpenThingsFramework::localServerLoop() {
       continue;
     }
 
+    bool lineEnded = (read < size) || buffer[length + read - 1] == '\r';
     char rc = buffer[length];
     length += read;
-    buffer[length++] = '\n';
 
-    if (read == 1 && rc == '\r') {
-      break;
-    }
-    if (length >= 4 && strncmp_P(&buffer[length - 4], (char *)F("\r\n\r\n"), 4) == 0) {
-      break;
+    if (lineEnded) {
+      buffer[length++] = '\n';
+
+      if (read == 1 && rc == '\r') {
+        break;
+      }
+      if (length >= 4 && strncmp_P(&buffer[length - 4], (char *)F("\r\n\r\n"), 4) == 0) {
+        break;
+      }
     }
   }
   OTF_DEBUG((char *) F("Finished reading data from client. Request line + headers were %d bytes\n"), length);
