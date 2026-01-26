@@ -33,8 +33,9 @@ OpenThingsFramework::OpenThingsFramework(uint16_t webServerPort, char *hdBuffer,
   }
   missingPageCallback = defaultMissingPageCallback;
   
+  OTF_DEBUG("Calling localServer.begin()...\n");
   localServer.begin();
-  OTF_DEBUG("OTF instantiated\n");
+  OTF_DEBUG("OTF instantiated and server started\n");
 };
 
 #if defined(ARDUINO)
@@ -115,9 +116,14 @@ void OpenThingsFramework::localServerLoop() {
     // but if we reached timeout, then reset wait_to to 0 and flush localClient so we can accept new client
     if(millis()>wait_to) {
       wait_to=0;
-      OTF_DEBUG(F("client wait timeout\n"));
       localClient->flush();
       localClient->stop();
+      
+      // Remove timed-out client from pool
+      #if defined(ARDUINO) && defined(ESP32)
+      localServer.removeClient(localClient);
+      localClient = nullptr;
+      #endif
     }
     return;
   }
@@ -257,6 +263,13 @@ void OpenThingsFramework::localServerLoop() {
   // Properly close the client connection.
   localClient->flush();
   localClient->stop();
+  
+  // WICHTIG: Remove client from pool after closing
+  #if defined(ARDUINO) && defined(ESP32)
+  OTF_DEBUG(F("Removing client from pool...\n"));
+  localServer.removeClient(localClient);
+  localClient = nullptr;
+  #endif
 
   // Get a new client to indicate that the previous client is no longer needed.
   localClient = localServer.acceptClient();

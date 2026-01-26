@@ -48,6 +48,9 @@ namespace OTF {
     
     virtual void flush() = 0;
     virtual void stop() = 0;
+    
+    /** Returns true if the client is still connected. */
+    virtual bool connected() = 0;
   };
 
   class LocalServer {
