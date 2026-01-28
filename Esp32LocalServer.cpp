@@ -3,6 +3,7 @@
 #include "Esp32LocalServer_Config.h"
 #include <lwip/sockets.h>  // For sockaddr_in
 #include <mbedtls/error.h>  // For mbedtls_strerror
+#include <esp_heap_caps.h>  // For heap_caps_malloc/free with PSRAM support
 
 #ifndef OTF_DEBUG
   #if defined(SERIAL_DEBUG) || defined(OTF_DEBUG_MODE)
@@ -22,22 +23,34 @@ using namespace OTF;
 inline void* otf_malloc(size_t size, bool preferPSRAM = true) {
 #if OTF_USE_PSRAM
   if (preferPSRAM && psramFound()) {
-    void* ptr = ps_malloc(size);
+    // Use heap_caps_malloc for better control over PSRAM allocation
+    void* ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (ptr) {
+      #ifdef OTF_DEBUG_MEMORY
       OTF_DEBUG("PSRAM malloc: %u bytes\n", (unsigned)size);
+      #endif
       return ptr;
     }
+    // PSRAM allocation failed - fall through to DRAM
+    #ifdef OTF_DEBUG_MEMORY
+    OTF_DEBUG("PSRAM malloc failed, trying DRAM for %u bytes\n", (unsigned)size);
+    #endif
   }
 #endif
   void* ptr = malloc(size);
   if (ptr) {
+    #ifdef OTF_DEBUG_MEMORY
     OTF_DEBUG("DRAM malloc: %u bytes\n", (unsigned)size);
+    #endif
   }
   return ptr;
 }
 
 inline void otf_free(void* ptr) {
-  if (ptr) free(ptr);
+  if (ptr) {
+    // heap_caps_free works for both PSRAM and DRAM
+    heap_caps_free(ptr);
+  }
 }
 
 // ============================================================================
