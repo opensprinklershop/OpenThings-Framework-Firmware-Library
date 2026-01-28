@@ -107,6 +107,21 @@
 // SSL/TLS OPTIMIZATION
 // ============================================================================
 
+/** Force TLS 1.3 only (disable TLS 1.2 for maximum security) */
+#ifndef OTF_FORCE_TLS_1_3_ONLY
+  #define OTF_FORCE_TLS_1_3_ONLY 1
+#endif
+
+/** Disable cipher suite configuration in code (use ESP-IDF config only) */
+#ifndef OTF_USE_ESPIDF_CIPHER_CONFIG
+  #define OTF_USE_ESPIDF_CIPHER_CONFIG 1
+#endif
+
+/** Use only hardware-accelerated AES cipher suites (GCM mode preferred) */
+#ifndef OTF_USE_HW_ACCELERATED_CIPHERS_ONLY
+  #define OTF_USE_HW_ACCELERATED_CIPHERS_ONLY 1
+#endif
+
 /** Maximum TLS record size to reduce memory pressure (bytes) */
 #ifndef OTF_TLS_MAX_RECORD_SIZE
   #define OTF_TLS_MAX_RECORD_SIZE 4096

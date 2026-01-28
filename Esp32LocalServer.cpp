@@ -129,37 +129,27 @@ bool WiFiSecureServer::setupSSLContext() {
     return false;
   }
 
-  // TLS Version Configuration: Enable TLS 1.2 and TLS 1.3
+  // TLS 1.3 ONLY - configured in ESP-IDF (sdkconfig)
+  // Cipher suites are controlled by ESP-IDF mbedTLS configuration for space savings
   #if defined(MBEDTLS_SSL_PROTO_TLS1_3)
-    mbedtls_ssl_conf_min_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_2);
+    mbedtls_ssl_conf_min_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_3);
     mbedtls_ssl_conf_max_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_3);
-    OTF_DEBUG("Using TLS 1.2 + TLS 1.3 with hardware-accelerated cipher suites\n");
+    OTF_DEBUG("TLS 1.3 ONLY with HW-accelerated AES-GCM (configured in ESP-IDF)\n");
   #else
-    mbedtls_ssl_conf_min_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_2);
-    mbedtls_ssl_conf_max_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_2);
-    OTF_DEBUG("Using TLS 1.2 with hardware-accelerated cipher suites (TLS 1.3 not available)\n");
+    #error "TLS 1.3 must be enabled in ESP-IDF (CONFIG_MBEDTLS_SSL_PROTO_TLS1_3=y)"
   #endif
   
   // Set random number generator
   mbedtls_ssl_conf_rng(&sslConf, mbedtls_ctr_drbg_random, &ctrDrbg);
-  // Disable client authentication (we're a server, don't need client certs)
+  
+  // Disable client authentication (server mode, no client certs needed)
   mbedtls_ssl_conf_authmode(&sslConf, MBEDTLS_SSL_VERIFY_NONE);
   
-  // Configure ONLY hardware-accelerated TLS 1.2 cipher suites for optimal performance
-  // ESP32-C5 has HW acceleration for: AES, SHA-256/384, ECC (P-256)
-  // Limited to 3 minimal cipher suites for maximum compatibility and low memory usage
-  static const int hw_accelerated_ciphersuites[] = {
-    // TLS 1.2 cipher suites with hardware acceleration (ONLY these 3)
-    0xC02B,  // TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256 (HW AES + HW ECC + HW SHA-256)
-    0xC02C,  // TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384 (HW AES + HW ECC + HW SHA-384)
-    0xC023,  // TLS-ECDHE-ECDSA-WITH-AES-128-CBC-SHA256 (Fallback, HW AES + HW ECC)
-    
-    0        // Terminator
-  };
-  
-  mbedtls_ssl_conf_ciphersuites(&sslConf, hw_accelerated_ciphersuites);
-  OTF_DEBUG("Configured %d minimal cipher suites for low memory\n", 
-            (sizeof(hw_accelerated_ciphersuites) / sizeof(int)) - 1);
+  // Cipher suites are now configured in ESP-IDF at compile time:
+  // - Only TLS 1.3: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384
+  // - Hardware-accelerated AES-GCM, SHA-256/384, ECC on ESP32-C5
+  // This saves ~2-4KB flash by removing runtime cipher selection code
+  OTF_DEBUG("Using ESP-IDF cipher configuration (TLS 1.3 AES-GCM only)\n");
   
   // Critical memory optimizations for ESP32-C5 (400KB SRAM, no PSRAM)
   #if defined(MBEDTLS_SSL_SESSION_TICKETS)
