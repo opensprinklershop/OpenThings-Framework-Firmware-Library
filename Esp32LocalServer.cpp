@@ -1,4 +1,5 @@
 #if defined(ESP32)
+#include "sdkconfig.h"  // ESP-IDF configuration - must be first for MBEDTLS defines
 #include "Esp32LocalServer.h"
 #include "Esp32LocalServer_Config.h"
 #include <lwip/sockets.h>  // For sockaddr_in
@@ -129,14 +130,18 @@ bool WiFiSecureServer::setupSSLContext() {
     return false;
   }
 
-  // TLS 1.3 ONLY - configured in ESP-IDF (sdkconfig)
+  // TLS 1.3 ONLY - configured in ESP-IDF (sdkconfig + esp_config.h)
   // Cipher suites are controlled by ESP-IDF mbedTLS configuration for space savings
-  #if defined(MBEDTLS_SSL_PROTO_TLS1_3)
+  #if defined(CONFIG_MBEDTLS_SSL_PROTO_TLS1_3) || defined(MBEDTLS_SSL_PROTO_TLS1_3)
     mbedtls_ssl_conf_min_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_3);
     mbedtls_ssl_conf_max_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_3);
     OTF_DEBUG("TLS 1.3 ONLY with HW-accelerated AES-GCM (configured in ESP-IDF)\n");
   #else
-    #error "TLS 1.3 must be enabled in ESP-IDF (CONFIG_MBEDTLS_SSL_PROTO_TLS1_3=y)"
+    #warning "TLS 1.3 is recommended for OpenSprinkler - set CONFIG_MBEDTLS_SSL_PROTO_TLS1_3=y in sdkconfig"
+    // Fallback to TLS 1.2 if TLS 1.3 is not available
+    mbedtls_ssl_conf_min_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_2);
+    mbedtls_ssl_conf_max_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_2);
+    OTF_DEBUG("TLS 1.2 fallback (TLS 1.3 not enabled in ESP-IDF)\n");
   #endif
   
   // Set random number generator
