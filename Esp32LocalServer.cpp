@@ -130,19 +130,14 @@ bool WiFiSecureServer::setupSSLContext() {
     return false;
   }
 
-  // TLS 1.3 ONLY - configured in ESP-IDF (sdkconfig + esp_config.h)
-  // Cipher suites are controlled by ESP-IDF mbedTLS configuration for space savings
-  #if defined(CONFIG_MBEDTLS_SSL_PROTO_TLS1_3) || defined(MBEDTLS_SSL_PROTO_TLS1_3)
-    mbedtls_ssl_conf_min_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_3);
-    mbedtls_ssl_conf_max_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_3);
-    OTF_DEBUG("TLS 1.3 ONLY with HW-accelerated AES-GCM (configured in ESP-IDF)\n");
-  #else
-    #warning "TLS 1.3 is recommended for OpenSprinkler - set CONFIG_MBEDTLS_SSL_PROTO_TLS1_3=y in sdkconfig"
-    // Fallback to TLS 1.2 if TLS 1.3 is not available
-    mbedtls_ssl_conf_min_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_2);
-    mbedtls_ssl_conf_max_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_2);
-    OTF_DEBUG("TLS 1.2 fallback (TLS 1.3 not enabled in ESP-IDF)\n");
-  #endif
+  // CRITICAL: TLS 1.3 ONLY - NO FALLBACK TO TLS 1.2
+  // Enforces TLS 1.3 exclusively for maximum security (forward secrecy, ECDHE-only)
+  // Hardware-accelerated AES-GCM ciphers on ESP32-C5 (3-5x faster)
+  // This prevents TLS 1.2 downgrade attacks and reduces cipher overhead
+  mbedtls_ssl_conf_min_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_3);
+  mbedtls_ssl_conf_max_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_3);
+  OTF_DEBUG(">>> ENFORCING TLS 1.3 ONLY (NO TLS 1.2 FALLBACK) <<<\n");
+  OTF_DEBUG(">>> Using Hardware-Accelerated AES-GCM on ESP32-C5 <<<\n");
   
   // Set random number generator
   mbedtls_ssl_conf_rng(&sslConf, mbedtls_ctr_drbg_random, &ctrDrbg);
@@ -161,8 +156,8 @@ bool WiFiSecureServer::setupSSLContext() {
     mbedtls_ssl_conf_session_tickets(&sslConf, MBEDTLS_SSL_SESSION_TICKETS_DISABLED);
   #endif
   
-  // Aggressive memory reduction
-  mbedtls_ssl_conf_max_frag_len(&sslConf, MBEDTLS_SSL_MAX_FRAG_LEN_512);  // 512 bytes
+  // Do not enforce Max Fragment Length extension; many browsers don't negotiate it
+  // Keep CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN=4096 for RAM savings without handshake failures
   
   // Disable heavyweight features
   #if defined(MBEDTLS_SSL_ENCRYPT_THEN_MAC)
@@ -172,7 +167,8 @@ bool WiFiSecureServer::setupSSLContext() {
     mbedtls_ssl_conf_extended_master_secret(&sslConf, MBEDTLS_SSL_EXTENDED_MS_DISABLED);
   #endif
   
-  // Reduce read timeout for faster error detection
+  // CRITICAL: TCP Keep-Alive reduces SSL renegotiation overhead
+  // Configure read timeout for faster error detection (3s instead of default 60s)
   mbedtls_ssl_conf_read_timeout(&sslConf, 3000);
 
   // Further runtime feature trimming (even if compiled in)
@@ -275,6 +271,48 @@ WiFiClient WiFiSecureServer::accept() {
 }
 // Note: Direct buffering removed - simplicity preferred for embedded systems
 // Clients are managed directly by Esp32LocalServer
+
+// Helper to enable TCP Keep-Alive on WiFiClient socket (reduces SSL renegotiation)
+static bool enableTCPKeepAlive(WiFiClient* wifiClient) {
+  if (!wifiClient || !wifiClient->connected()) return false;
+  
+  // Get socket FD from WiFiClient
+  int sockfd = wifiClient->fd();
+  if (sockfd < 0) {
+    OTF_DEBUG("Invalid socket FD\n");
+    return false;
+  }
+  
+  // Enable TCP Keep-Alive (SO_KEEPALIVE)
+  int keepalive = 1;
+  if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive)) < 0) {
+    OTF_DEBUG("Failed to enable SO_KEEPALIVE: %s\n", strerror(errno));
+    return false;
+  }
+  
+  // TCP_KEEPIDLE: Time before sending first keepalive probe (seconds)
+  int keepidle = 30;  // 30 seconds idle before first probe
+  if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle)) < 0) {
+    OTF_DEBUG("Failed to set TCP_KEEPIDLE: %s\n", strerror(errno));
+  }
+  
+  // TCP_KEEPINTVL: Interval between keepalive probes (seconds)
+  int keepintvl = 10;  // 10 seconds between probes
+  if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl)) < 0) {
+    OTF_DEBUG("Failed to set TCP_KEEPINTVL: %s\n", strerror(errno));
+  }
+  
+  // TCP_KEEPCNT: Number of probes before closing connection
+  int keepcnt = 3;  // 3 failed probes = close
+  if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt)) < 0) {
+    OTF_DEBUG("Failed to set TCP_KEEPCNT: %s\n", strerror(errno));
+  }
+  
+  OTF_DEBUG("TCP Keep-Alive enabled (idle=%ds, intvl=%ds, cnt=%d)\n", 
+            keepidle, keepintvl, keepcnt);
+  return true;
+}
+
 mbedtls_ssl_context* WiFiSecureServer::handshakeSSL(WiFiClient* wifiClient) {
   if (!initialized) {
     OTF_DEBUG("SSL context not initialized\n");
@@ -300,6 +338,11 @@ mbedtls_ssl_context* WiFiSecureServer::handshakeSSL(WiFiClient* wifiClient) {
   
   OTF_DEBUG("handshakeSSL: Free heap: %d bytes, largest block: %d bytes\n", 
                 ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  
+  // CRITICAL: Enable TCP Keep-Alive to reduce SSL renegotiation overhead
+  // This keeps TCP connection alive during idle periods, reducing need for
+  // expensive SSL session resumption or full handshakes
+  enableTCPKeepAlive(wifiClient);
   
   OTF_DEBUG("Starting SSL handshake...\n");
   
@@ -592,6 +635,10 @@ Esp32HttpClient::Esp32HttpClient(WiFiClient wifiClient)
   : client(wifiClient), isActive(true) {
   OTF_DEBUG("HTTP client initialized\n");
   client.setNoDelay(true);
+  
+  // Enable TCP Keep-Alive for HTTP clients to maintain connection
+  // during idle periods (reduces connection overhead)
+  enableTCPKeepAlive(&client);
 }
 
 OTF::Esp32HttpClient::~Esp32HttpClient() {
