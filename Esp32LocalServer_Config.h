@@ -7,9 +7,17 @@
  * 
  * This header provides compile-time configuration for:
  * - Connection pool management
- * - PSRAM usage and memory optimization
+ * - PSRAM usage and memory optimization (critically integrated with sdkconfig.esp32-c5)
  * - Performance tuning and caching
  * - Debug settings
+ * - Malloc thresholds for SPIRAM allocation
+ * 
+ * CRITICAL: This config must match sdkconfig settings for proper memory management:
+ * - sdkconfig.esp32-c5: CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=8192
+ * - sdkconfig.esp32-c5: CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=16384
+ * - framework: esp32-hal-psram.c: heap_caps_malloc_extmem_enable(8)
+ * 
+ * See SPIRAM_MALLOC_OPTIMIZATION.md for memory architecture details.
  */
 
 // ============================================================================
@@ -119,7 +127,7 @@
 
 /** Use only hardware-accelerated AES cipher suites (GCM mode preferred) */
 #ifndef OTF_USE_HW_ACCELERATED_CIPHERS_ONLY
-  #define OTF_USE_HW_ACCELERATED_CIPHERS_ONLY 1
+  #define OTF_USE_HW_ACCELERATED_CIPHERS_ONLY 0
 #endif
 
 /** Maximum TLS record size to reduce memory pressure (bytes) */
@@ -170,8 +178,31 @@
 // PLATFORM-SPECIFIC CONFIGURATION
 // ============================================================================
 
-#if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C3)
-  // ESP32-C5/C3: Lower memory profile, optimize aggressively
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+  // ESP32-C5: HAS 8MB PSRAM! Enable aggressive PSRAM usage
+  #undef OTF_MAX_CONCURRENT_CLIENTS
+  #define OTF_MAX_CONCURRENT_CLIENTS 6
+  
+  #undef OTF_CLIENT_READ_BUFFER_SIZE
+  #define OTF_CLIENT_READ_BUFFER_SIZE 4096  // Full size, use PSRAM
+  
+  #undef OTF_CLIENT_WRITE_BUFFER_SIZE
+  #define OTF_CLIENT_WRITE_BUFFER_SIZE 8192  // Full size, use PSRAM
+  
+  #undef OTF_USE_PSRAM
+  #define OTF_USE_PSRAM 1  // ENABLED: 8MB PSRAM available
+  
+  #undef OTF_ENABLE_PSRAM_POOL
+  #define OTF_ENABLE_PSRAM_POOL 1  // Use PSRAM pool allocator
+  
+  #undef OTF_USE_HW_ACCELERATED_CIPHERS_ONLY
+  #define OTF_USE_HW_ACCELERATED_CIPHERS_ONLY 0  // NO HARDWARE ACCELERATION
+  
+  #undef OTF_SPIRAM_MALLOC_THRESHOLD
+  #define OTF_SPIRAM_MALLOC_THRESHOLD 256  // Aggressive SPIRAM usage
+  
+#elif defined(CONFIG_IDF_TARGET_ESP32C3)
+  // ESP32-C3: Lower memory profile (no PSRAM), optimize aggressively
   #undef OTF_MAX_CONCURRENT_CLIENTS
   #define OTF_MAX_CONCURRENT_CLIENTS 3
   
@@ -182,7 +213,7 @@
   #define OTF_CLIENT_WRITE_BUFFER_SIZE 4096
   
   #undef OTF_USE_PSRAM
-  #define OTF_USE_PSRAM 0  // No PSRAM on C5/C3
+  #define OTF_USE_PSRAM 0  // No PSRAM on C3
   
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
   // ESP32-S3: Has PSRAM, more generous configuration
@@ -199,6 +230,29 @@
   // Standard ESP32: Default configuration
   #undef OTF_MAX_CONCURRENT_CLIENTS
   #define OTF_MAX_CONCURRENT_CLIENTS 4
+#endif
+
+// ============================================================================
+// MALLOC CONFIGURATION FOR PSRAM
+// ============================================================================
+
+/**
+ * Configuration for PSRAM malloc thresholds.
+ * These settings should match sdkconfig.esp32-c5 for consistency:
+ * - CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL: 8192 (8 KB threshold)
+ * - CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL: 16384 (16 KB reserve)
+ * 
+ * Usage:
+ * - Small allocations (<=8 KB) stay in fast internal RAM
+ * - Large allocations (>8 KB) automatically route to SPIRAM
+ * - Critical functions get 16 KB reserved internal RAM
+ */
+#ifndef OTF_SPIRAM_MALLOC_THRESHOLD
+  #define OTF_SPIRAM_MALLOC_THRESHOLD 256  // 256 bytes - alles größer geht nach SPIRAM
+#endif
+
+#ifndef OTF_SPIRAM_MALLOC_RESERVE
+  #define OTF_SPIRAM_MALLOC_RESERVE 16384  // 16 KB (matches sdkconfig)
 #endif
 
 // ============================================================================

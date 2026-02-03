@@ -5,5 +5,24 @@
     "description": "OpenThings Framework Library",
     "dependencies": {
         "WebSockets": "opensprinklershop/arduinoWebSockets"
+    },
+    "build": {
+        "srcFilter": [
+            "+<*>",
+            "-<LinuxLocalServer.cpp>",
+            "-<LinuxLocalServer.h>",
+            "-<etherport.cpp>",
+            "-<etherport.h>",
+            "-<Esp8266LocalServer.cpp>",
+            "-<Esp8266LocalServer.h>"
+        ],
+        "flags": [
+            "-DARDUINO",
+            "-DARDUINO_ESP32"
+        ],
+        "unflags": [
+            "-Os",
+            "-mlongcalls"
+        ]
     }
 }

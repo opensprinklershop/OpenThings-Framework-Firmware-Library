@@ -1,5 +1,9 @@
 #if defined(ESP32)
-#include "sdkconfig.h"  // ESP-IDF configuration - must be first for MBEDTLS defines
+#ifdef __has_include
+  #if __has_include("sdkconfig.h")
+    #include "sdkconfig.h"  // ESP-IDF configuration - must be first for MBEDTLS defines
+  #endif
+#endif
 #include "Esp32LocalServer.h"
 #include "Esp32LocalServer_Config.h"
 #include <lwip/sockets.h>  // For sockaddr_in

@@ -3,12 +3,48 @@
 
 ---
 
+## � KRITISCHE KONFIGURATION (2026-01-31 SPIRAM FIXES)
+
+### Neueste Änderungen
+
+**FIX: ESP32-C5 PSRAM Support** ✅
+- **Problem:** Framework war falsch konfiguriert, PSRAM auf ESP32-C5 war DEAKTIVIERT
+- **Solution:** `Esp32LocalServer_Config.h` korrigiert
+  - `OTF_USE_PSRAM = 1` für ESP32-C5 (hat 8MB PSRAM!)
+  - `OTF_MAX_CONCURRENT_CLIENTS = 6` (war 3, jetzt volle Unterstützung)
+  - `OTF_CLIENT_READ_BUFFER_SIZE = 4096` (war 2048)
+  - `OTF_CLIENT_WRITE_BUFFER_SIZE = 8192` (war 4096)
+
+**INTEGRAL mit sdkconfig.esp32-c5:**
+```
+sdkconfig.esp32-c5:
+  CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=8192     ← 8 KB threshold
+  CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=16384  ← 16 KB reserve
+  
+framework esp32-hal-psram.c:
+  heap_caps_malloc_extmem_enable(8);  ← 8-byte threshold override
+  
+framework Esp32LocalServer_Config.h:
+  OTF_SPIRAM_MALLOC_THRESHOLD=8192    ← Matches sdkconfig
+  OTF_SPIRAM_MALLOC_RESERVE=16384     ← Matches sdkconfig
+```
+
+**Auswirkung:**
+- ✅ Allocations >8 KB automatisch in SPIRAM (2 MB verfügbar)
+- ✅ Allocations ≤8 KB bleiben in schnellem Internal RAM
+- ✅ Keine Fragmentierung des begrenzten IRAM
+- ✅ WebSocket, JSON, Buffers → SPIRAM
+- ✅ SSL/TLS → SPIRAM
+- ✅ Kritische Funktionen → ~16 KB Internal RAM
+
+---
+
 ## 📋 Überblick
 
 Diese umfassende Erweiterung des OpenThings Framework für den ESP32 bietet:
 
 ✅ **Multi-Client Support** - Bis zu 8 gleichzeitige Verbindungen
-✅ **PSRAM-Integration** - Automatische Speicheroptimierung  
+✅ **PSRAM-Integration** - Automatische Speicheroptimierung (jetzt korrekt für C5)
 ✅ **Performance-Boost** - 50-60% schneller durch TCP_NODELAY + Buffering
 ✅ **100% Kompatibilität** - Alle bestehenden Programme funktionieren ungeändert
 ✅ **Umfassend dokumentiert** - 6 Dokumentationsdateien + 2 Beispiel-Sketches
