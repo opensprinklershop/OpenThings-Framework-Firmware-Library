@@ -134,14 +134,19 @@ bool WiFiSecureServer::setupSSLContext() {
     return false;
   }
 
-  // CRITICAL: TLS 1.3 ONLY - NO FALLBACK TO TLS 1.2
-  // Enforces TLS 1.3 exclusively for maximum security (forward secrecy, ECDHE-only)
-  // Hardware-accelerated AES-GCM ciphers on ESP32-C5 (3-5x faster)
-  // This prevents TLS 1.2 downgrade attacks and reduces cipher overhead
-  mbedtls_ssl_conf_min_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_3);
-  mbedtls_ssl_conf_max_tls_version(&sslConf, MBEDTLS_SSL_VERSION_TLS1_3);
-  OTF_DEBUG(">>> ENFORCING TLS 1.3 ONLY (NO TLS 1.2 FALLBACK) <<<\n");
-  OTF_DEBUG(">>> Using Hardware-Accelerated AES-GCM on ESP32-C5 <<<\n");
+  // TLS version configuration
+  // IMPORTANT: Don't override TLS version - let mbedtls_ssl_config_defaults set it
+  // based on what's actually compiled into the SDK. Overriding with explicit versions
+  // can cause MBEDTLS_ERR_SSL_BAD_CONFIG (-0x5e80) if the version isn't supported.
+  // The ESP-IDF SDK configures this via CONFIG_MBEDTLS_SSL_PROTO_TLS1_2/TLS1_3.
+#if defined(CONFIG_MBEDTLS_SSL_PROTO_TLS1_3) && CONFIG_MBEDTLS_SSL_PROTO_TLS1_3
+  OTF_DEBUG(">>> TLS 1.3 enabled in SDK <<<\n");
+#elif defined(CONFIG_MBEDTLS_SSL_PROTO_TLS1_2) && CONFIG_MBEDTLS_SSL_PROTO_TLS1_2
+  OTF_DEBUG(">>> TLS 1.2 enabled in SDK (TLS 1.3 not available) <<<\n");
+#else
+  OTF_DEBUG(">>> WARNING: No TLS version explicitly enabled in SDK <<<\n");
+#endif
+  OTF_DEBUG(">>> Hardware-Accelerated crypto on ESP32 <<<\n");
   
   // Set random number generator
   mbedtls_ssl_conf_rng(&sslConf, mbedtls_ctr_drbg_random, &ctrDrbg);
@@ -149,11 +154,26 @@ bool WiFiSecureServer::setupSSLContext() {
   // Disable client authentication (server mode, no client certs needed)
   mbedtls_ssl_conf_authmode(&sslConf, MBEDTLS_SSL_VERIFY_NONE);
   
-  // Cipher suites are now configured in ESP-IDF at compile time:
-  // - Only TLS 1.3: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384
-  // - Hardware-accelerated AES-GCM, SHA-256/384, ECC on ESP32-C5
+  // CRITICAL: Explicitly set supported groups/curves to avoid SSL_BAD_CONFIG
+  // ESP-IDF's dynamic SSL buffer code in esp_ssl_tls.c validates curve_list
+  // at ssl_setup time. Without explicit configuration, it may fail.
+  static const uint16_t supported_groups[] = {
+    MBEDTLS_SSL_IANA_TLS_GROUP_SECP256R1,  // P-256 (our cert uses this)
+    MBEDTLS_SSL_IANA_TLS_GROUP_NONE
+  };
+  mbedtls_ssl_conf_groups(&sslConf, supported_groups);
+  OTF_DEBUG("Configured supported groups: secp256r1\n");
+  
+  // Cipher suites are configured in ESP-IDF at compile time:
+  // - TLS 1.3: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384
+  // - TLS 1.2: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, etc.
+  // - Hardware-accelerated AES-GCM, SHA-256/384, ECC on ESP32
   // This saves ~2-4KB flash by removing runtime cipher selection code
-  OTF_DEBUG("Using ESP-IDF cipher configuration (TLS 1.3 AES-GCM only)\n");
+#if defined(CONFIG_MBEDTLS_SSL_PROTO_TLS1_3) && CONFIG_MBEDTLS_SSL_PROTO_TLS1_3
+  OTF_DEBUG("Using ESP-IDF cipher configuration (TLS 1.3 AES-GCM)\n");
+#else
+  OTF_DEBUG("Using ESP-IDF cipher configuration (TLS 1.2)\n");
+#endif
   
   // Critical memory optimizations for ESP32-C5 (400KB SRAM, no PSRAM)
   #if defined(MBEDTLS_SSL_SESSION_TICKETS)
@@ -318,13 +338,16 @@ static bool enableTCPKeepAlive(WiFiClient* wifiClient) {
 }
 
 mbedtls_ssl_context* WiFiSecureServer::handshakeSSL(WiFiClient* wifiClient) {
+  OTF_DEBUG(">>> handshakeSSL ENTRY: initialized=%d, wifiClient=%p\n", initialized, (void*)wifiClient);
+  
   if (!initialized) {
     OTF_DEBUG("SSL context not initialized\n");
     return NULL;
   }
   
   if (!wifiClient || !wifiClient->connected()) {
-    OTF_DEBUG("Invalid or disconnected WiFiClient\n");
+    OTF_DEBUG("Invalid or disconnected WiFiClient (ptr=%p, connected=%d)\n", 
+              (void*)wifiClient, wifiClient ? wifiClient->connected() : -1);
     return NULL;
   }
 
@@ -359,6 +382,9 @@ mbedtls_ssl_context* WiFiSecureServer::handshakeSSL(WiFiClient* wifiClient) {
   mbedtls_ssl_init(ssl);
   
   OTF_DEBUG("After ssl_init: Free heap: %d bytes\n", ESP.getFreeHeap());
+  
+  // Debug: Check if SSL config is properly initialized
+  OTF_DEBUG("SSL Config check: conf ptr=%p\n", (void*)&sslConf);
   
   OTF_DEBUG("Calling mbedtls_ssl_setup...\n");
   

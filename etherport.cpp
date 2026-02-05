@@ -66,7 +66,8 @@ EthernetServer::~EthernetServer()
 
 bool EthernetServer::begin()
 {
-	struct sockaddr_in6 sin = {0};
+	struct sockaddr_in6 sin;
+	memset(&sin, 0, sizeof(sin));
 	sin.sin6_family = AF_INET6;
 	sin.sin6_port = htons(m_port);
 	sin.sin6_addr = in6addr_any;
@@ -154,7 +155,8 @@ int EthernetClient::connect(const char* server, uint16_t port)
 		return 0;
 	}
 
-	struct sockaddr_in sin = {0};
+	struct sockaddr_in sin;
+	memset(&sin, 0, sizeof(sin));
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(port);
 	sin.sin_addr.s_addr = *(uint32_t*) (host->h_addr);
@@ -366,7 +368,8 @@ int EthernetClientSsl::connect(const char* server, uint16_t port)
 	// Create a new SSL session. This does not connect the socket.
 	ssl = SSL_new(ctx);
 
-	struct sockaddr_in sin = {0};
+	struct sockaddr_in sin;
+	memset(&sin, 0, sizeof(sin));
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(port);
 	sin.sin_addr.s_addr = *(long*) (host->h_addr);

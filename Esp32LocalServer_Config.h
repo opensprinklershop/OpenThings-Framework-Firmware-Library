@@ -3,21 +3,10 @@
 
 /**
  * @file Esp32LocalServer_Config.h
- * @brief Configuration and optimization settings for OpenThings Framework ESP32 multi-client support
+ * @brief Configuration for OpenThings Framework ESP32 multi-client support
  * 
- * This header provides compile-time configuration for:
- * - Connection pool management
- * - PSRAM usage and memory optimization (critically integrated with sdkconfig.esp32-c5)
- * - Performance tuning and caching
- * - Debug settings
- * - Malloc thresholds for SPIRAM allocation
- * 
- * CRITICAL: This config must match sdkconfig settings for proper memory management:
- * - sdkconfig.esp32-c5: CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=8192
- * - sdkconfig.esp32-c5: CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=16384
- * - framework: esp32-hal-psram.c: heap_caps_malloc_extmem_enable(8)
- * 
- * See SPIRAM_MALLOC_OPTIMIZATION.md for memory architecture details.
+ * Simplified configuration - PSRAM allocation handled by global malloc override.
+ * See psram_utils.cpp for memory management details.
  */
 
 // ============================================================================
@@ -34,115 +23,27 @@
   #define OTF_CLIENT_POOL_SIZE 6
 #endif
 
-/** Enable round-robin client selection (load balancing) */
-#ifndef OTF_ENABLE_ROUND_ROBIN
-  #define OTF_ENABLE_ROUND_ROBIN 1
-#endif
-
-// ============================================================================
-// PSRAM CONFIGURATION
-// ============================================================================
-
-/** Enable PSRAM usage for buffers and data structures (if available on ESP32) */
-#ifndef OTF_USE_PSRAM
-  #define OTF_USE_PSRAM 1
-#endif
-
-/** Use PSRAM for SSL/TLS context when available (increases number of concurrent HTTPS connections) */
-#ifndef OTF_USE_PSRAM_FOR_SSL
-  #define OTF_USE_PSRAM_FOR_SSL 1
-#endif
-
-/** Enable memory pool allocator using PSRAM for reduced fragmentation */
-#ifndef OTF_ENABLE_PSRAM_POOL
-  #define OTF_ENABLE_PSRAM_POOL 1  // Enabled for ESP32-C5 with 8MB PSRAM
-#endif
-
 // ============================================================================
 // BUFFER CONFIGURATION
 // ============================================================================
 
-/** Size of read buffer per HTTP client (in bytes) */
+/** Size of read buffer per HTTP client (in bytes) - allocated in PSRAM via global malloc */
 #ifndef OTF_CLIENT_READ_BUFFER_SIZE
   #define OTF_CLIENT_READ_BUFFER_SIZE 4096
 #endif
 
-/** Size of write buffer per client (in bytes) */
+/** Size of write buffer per client (in bytes) - allocated in PSRAM via global malloc */
 #ifndef OTF_CLIENT_WRITE_BUFFER_SIZE
   #define OTF_CLIENT_WRITE_BUFFER_SIZE 8192
-#endif
-
-/** Enable write buffering to reduce fragmented writes */
-#ifndef OTF_ENABLE_WRITE_BUFFERING
-  #define OTF_ENABLE_WRITE_BUFFERING 1
-#endif
-
-/** Enable read-ahead caching for sequential reads */
-#ifndef OTF_ENABLE_READ_CACHE
-  #define OTF_ENABLE_READ_CACHE 1
 #endif
 
 // ============================================================================
 // PERFORMANCE & OPTIMIZATION
 // ============================================================================
 
-/** Cache HTTP response headers to reduce parsing overhead */
-#ifndef OTF_ENABLE_HEADER_CACHE
-  #define OTF_ENABLE_HEADER_CACHE 1
-#endif
-
-/** Enable TCP_NODELAY (disable Nagle's algorithm) for low-latency responses */
-#ifndef OTF_ENABLE_TCP_NODELAY
-  #define OTF_ENABLE_TCP_NODELAY 1
-#endif
-
 /** Timeout for idle client connections (in milliseconds) */
 #ifndef OTF_CLIENT_IDLE_TIMEOUT_MS
   #define OTF_CLIENT_IDLE_TIMEOUT_MS 30000  // 30 seconds
-#endif
-
-/** Enable connection keep-alive with periodic pings */
-#ifndef OTF_ENABLE_KEEP_ALIVE
-  #define OTF_ENABLE_KEEP_ALIVE 1
-#endif
-
-/** Keep-alive interval in milliseconds */
-#ifndef OTF_KEEP_ALIVE_INTERVAL_MS
-  #define OTF_KEEP_ALIVE_INTERVAL_MS 15000  // 15 seconds
-#endif
-
-// ============================================================================
-// SSL/TLS OPTIMIZATION
-// ============================================================================
-
-/** Force TLS 1.3 only (disable TLS 1.2 for maximum security) */
-#ifndef OTF_FORCE_TLS_1_3_ONLY
-  #define OTF_FORCE_TLS_1_3_ONLY 1
-#endif
-
-/** Disable cipher suite configuration in code (use ESP-IDF config only) */
-#ifndef OTF_USE_ESPIDF_CIPHER_CONFIG
-  #define OTF_USE_ESPIDF_CIPHER_CONFIG 1
-#endif
-
-/** Use only hardware-accelerated AES cipher suites (GCM mode preferred) */
-#ifndef OTF_USE_HW_ACCELERATED_CIPHERS_ONLY
-  #define OTF_USE_HW_ACCELERATED_CIPHERS_ONLY 0
-#endif
-
-/** Maximum TLS record size to reduce memory pressure (bytes) */
-#ifndef OTF_TLS_MAX_RECORD_SIZE
-  #define OTF_TLS_MAX_RECORD_SIZE 4096
-#endif
-
-/** Enable session caching for TLS handshake optimization */
-#ifndef OTF_ENABLE_TLS_SESSION_CACHE
-  #define OTF_ENABLE_TLS_SESSION_CACHE 1
-#endif
-
-/** TLS session cache size (number of sessions) */
-#ifndef OTF_TLS_SESSION_CACHE_SIZE
-  #define OTF_TLS_SESSION_CACHE_SIZE 2
 #endif
 
 /** SSL/TLS handshake timeout (milliseconds) */
@@ -179,30 +80,18 @@
 // ============================================================================
 
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
-  // ESP32-C5: HAS 8MB PSRAM! Enable aggressive PSRAM usage
+  // ESP32-C5: 8MB PSRAM via global malloc override
   #undef OTF_MAX_CONCURRENT_CLIENTS
   #define OTF_MAX_CONCURRENT_CLIENTS 6
   
   #undef OTF_CLIENT_READ_BUFFER_SIZE
-  #define OTF_CLIENT_READ_BUFFER_SIZE 4096  // Full size, use PSRAM
+  #define OTF_CLIENT_READ_BUFFER_SIZE 8192
   
   #undef OTF_CLIENT_WRITE_BUFFER_SIZE
-  #define OTF_CLIENT_WRITE_BUFFER_SIZE 8192  // Full size, use PSRAM
-  
-  #undef OTF_USE_PSRAM
-  #define OTF_USE_PSRAM 1  // ENABLED: 8MB PSRAM available
-  
-  #undef OTF_ENABLE_PSRAM_POOL
-  #define OTF_ENABLE_PSRAM_POOL 1  // Use PSRAM pool allocator
-  
-  #undef OTF_USE_HW_ACCELERATED_CIPHERS_ONLY
-  #define OTF_USE_HW_ACCELERATED_CIPHERS_ONLY 0  // NO HARDWARE ACCELERATION
-  
-  #undef OTF_SPIRAM_MALLOC_THRESHOLD
-  #define OTF_SPIRAM_MALLOC_THRESHOLD 256  // Aggressive SPIRAM usage
+  #define OTF_CLIENT_WRITE_BUFFER_SIZE 16384
   
 #elif defined(CONFIG_IDF_TARGET_ESP32C3)
-  // ESP32-C3: Lower memory profile (no PSRAM), optimize aggressively
+  // ESP32-C3: No PSRAM - keep buffers small
   #undef OTF_MAX_CONCURRENT_CLIENTS
   #define OTF_MAX_CONCURRENT_CLIENTS 3
   
@@ -212,47 +101,15 @@
   #undef OTF_CLIENT_WRITE_BUFFER_SIZE
   #define OTF_CLIENT_WRITE_BUFFER_SIZE 4096
   
-  #undef OTF_USE_PSRAM
-  #define OTF_USE_PSRAM 0  // No PSRAM on C3
-  
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
-  // ESP32-S3: Has PSRAM, more generous configuration
+  // ESP32-S3: PSRAM available via global malloc
   #undef OTF_MAX_CONCURRENT_CLIENTS
   #define OTF_MAX_CONCURRENT_CLIENTS 8
-  
-  #undef OTF_USE_PSRAM
-  #define OTF_USE_PSRAM 1
-  
-  #undef OTF_ENABLE_PSRAM_POOL
-  #define OTF_ENABLE_PSRAM_POOL 1
   
 #elif defined(CONFIG_IDF_TARGET_ESP32)
   // Standard ESP32: Default configuration
   #undef OTF_MAX_CONCURRENT_CLIENTS
   #define OTF_MAX_CONCURRENT_CLIENTS 4
-#endif
-
-// ============================================================================
-// MALLOC CONFIGURATION FOR PSRAM
-// ============================================================================
-
-/**
- * Configuration for PSRAM malloc thresholds.
- * These settings should match sdkconfig.esp32-c5 for consistency:
- * - CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL: 8192 (8 KB threshold)
- * - CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL: 16384 (16 KB reserve)
- * 
- * Usage:
- * - Small allocations (<=8 KB) stay in fast internal RAM
- * - Large allocations (>8 KB) automatically route to SPIRAM
- * - Critical functions get 16 KB reserved internal RAM
- */
-#ifndef OTF_SPIRAM_MALLOC_THRESHOLD
-  #define OTF_SPIRAM_MALLOC_THRESHOLD 256  // 256 bytes - alles größer geht nach SPIRAM
-#endif
-
-#ifndef OTF_SPIRAM_MALLOC_RESERVE
-  #define OTF_SPIRAM_MALLOC_RESERVE 16384  // 16 KB (matches sdkconfig)
 #endif
 
 // ============================================================================
