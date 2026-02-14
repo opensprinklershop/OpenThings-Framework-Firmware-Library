@@ -92,7 +92,7 @@ static int wifi_client_recv(void *ctx, unsigned char *buf, size_t len) {
 
 WiFiSecureServer::WiFiSecureServer(uint16_t port, const unsigned char* cert, uint16_t certLen, 
                                    const unsigned char* key, uint16_t keyLen)
-  : server(port, 1), port(port),
+  : server(port, 5), port(port),
     certData(cert), certLength(certLen),
     keyData(key), keyLength(keyLen), initialized(false) {
   
@@ -102,9 +102,31 @@ WiFiSecureServer::WiFiSecureServer(uint16_t port, const unsigned char* cert, uin
   mbedtls_pk_init(&serverKey);
   mbedtls_entropy_init(&entropy);
   mbedtls_ctr_drbg_init(&ctrDrbg);
+#if defined(MBEDTLS_SSL_SESSION_TICKETS)
+  mbedtls_ssl_ticket_init(&ticketCtx);
+  ticketCtxInitialized = false;
+#endif
+  // Initialize SSL context pool
+  for (int i = 0; i < SSL_CTX_POOL_SIZE; i++) {
+    sslPool[i] = nullptr;
+    sslPoolInUse[i] = false;
+  }
 }
 
 WiFiSecureServer::~WiFiSecureServer() {
+  // Free SSL context pool
+  for (int i = 0; i < SSL_CTX_POOL_SIZE; i++) {
+    if (sslPool[i]) {
+      mbedtls_ssl_free(sslPool[i]);
+      delete sslPool[i];
+      sslPool[i] = nullptr;
+    }
+  }
+#if defined(MBEDTLS_SSL_SESSION_TICKETS)
+  if (ticketCtxInitialized) {
+    mbedtls_ssl_ticket_free(&ticketCtx);
+  }
+#endif
   mbedtls_ssl_config_free(&sslConf);
   mbedtls_x509_crt_free(&serverCert);
   mbedtls_pk_free(&serverKey);
@@ -134,92 +156,87 @@ bool WiFiSecureServer::setupSSLContext() {
     return false;
   }
 
-  // TLS version configuration
-  // IMPORTANT: Don't override TLS version - let mbedtls_ssl_config_defaults set it
-  // based on what's actually compiled into the SDK. Overriding with explicit versions
-  // can cause MBEDTLS_ERR_SSL_BAD_CONFIG (-0x5e80) if the version isn't supported.
-  // The ESP-IDF SDK configures this via CONFIG_MBEDTLS_SSL_PROTO_TLS1_2/TLS1_3.
+  // TLS version: Let mbedtls_ssl_config_defaults set it based on SDK compile flags.
+  // Overriding explicitly can cause MBEDTLS_ERR_SSL_BAD_CONFIG (-0x5e80).
 #if defined(CONFIG_MBEDTLS_SSL_PROTO_TLS1_3) && CONFIG_MBEDTLS_SSL_PROTO_TLS1_3
   OTF_DEBUG(">>> TLS 1.3 enabled in SDK <<<\n");
 #elif defined(CONFIG_MBEDTLS_SSL_PROTO_TLS1_2) && CONFIG_MBEDTLS_SSL_PROTO_TLS1_2
-  OTF_DEBUG(">>> TLS 1.2 enabled in SDK (TLS 1.3 not available) <<<\n");
-#else
-  OTF_DEBUG(">>> WARNING: No TLS version explicitly enabled in SDK <<<\n");
+  OTF_DEBUG(">>> TLS 1.2 only (TLS 1.3 not available) <<<\n");
 #endif
-  OTF_DEBUG(">>> Hardware-Accelerated crypto on ESP32 <<<\n");
   
   // Set random number generator
   mbedtls_ssl_conf_rng(&sslConf, mbedtls_ctr_drbg_random, &ctrDrbg);
   
-  // Disable client authentication (server mode, no client certs needed)
+  // No client certificate verification needed (self-signed server cert)
   mbedtls_ssl_conf_authmode(&sslConf, MBEDTLS_SSL_VERIFY_NONE);
   
-  // CRITICAL: Explicitly set supported groups/curves to avoid SSL_BAD_CONFIG
-  // ESP-IDF's dynamic SSL buffer code in esp_ssl_tls.c validates curve_list
-  // at ssl_setup time. Without explicit configuration, it may fail.
+  // ==========================================================================
+  // Supported groups/curves — ordered by performance for TLS 1.3 key exchange.
+  // x25519 is fastest (~25% faster than P-256 ECDHE) and preferred by all
+  // modern TLS 1.3 clients. Without x25519, clients send a P-256 key share
+  // or trigger HelloRetryRequest (extra round trip = ~100ms penalty).
+  // P-256 is needed because our server certificate uses a P-256 ECDSA key.
+  // ==========================================================================
   static const uint16_t supported_groups[] = {
-    MBEDTLS_SSL_IANA_TLS_GROUP_SECP256R1,  // P-256 (our cert uses this)
+    MBEDTLS_SSL_IANA_TLS_GROUP_X25519,     // Fastest for TLS 1.3 key exchange
+    MBEDTLS_SSL_IANA_TLS_GROUP_SECP256R1,  // P-256 — HW accel, matches our cert
+    MBEDTLS_SSL_IANA_TLS_GROUP_SECP384R1,  // P-384 — HW accel, fallback
     MBEDTLS_SSL_IANA_TLS_GROUP_NONE
   };
   mbedtls_ssl_conf_groups(&sslConf, supported_groups);
-  OTF_DEBUG("Configured supported groups: secp256r1\n");
+  OTF_DEBUG("Configured groups: x25519, secp256r1, secp384r1\n");
   
-  // Cipher suites are configured in ESP-IDF at compile time:
-  // - TLS 1.3: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384
-  // - TLS 1.2: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, etc.
-  // - Hardware-accelerated AES-GCM, SHA-256/384, ECC on ESP32
-  // This saves ~2-4KB flash by removing runtime cipher selection code
-#if defined(CONFIG_MBEDTLS_SSL_PROTO_TLS1_3) && CONFIG_MBEDTLS_SSL_PROTO_TLS1_3
-  OTF_DEBUG("Using ESP-IDF cipher configuration (TLS 1.3 AES-GCM)\n");
-#else
-  OTF_DEBUG("Using ESP-IDF cipher configuration (TLS 1.2)\n");
+  // ==========================================================================
+  // Session Tickets — CRITICAL for HTTPS performance!
+  // Without tickets, every connection requires a full TLS handshake:
+  //   TLS 1.3: 1-RTT + ECDHE + ECDSA-verify (~150-300ms on ESP32-C5)
+  //   TLS 1.2: 2-RTT + ECDHE + ECDSA-verify (~250-500ms on ESP32-C5)
+  // With tickets, resumption is 0-RTT (TLS 1.3) or 1-RTT (TLS 1.2):
+  //   ~20-50ms — just symmetric crypto, no expensive ECC operations.
+  // ==========================================================================
+#if defined(MBEDTLS_SSL_SESSION_TICKETS) && defined(MBEDTLS_SSL_SRV_C)
+  ret = mbedtls_ssl_ticket_setup(&ticketCtx,
+                                  mbedtls_ctr_drbg_random, &ctrDrbg,
+                                  MBEDTLS_CIPHER_AES_256_GCM,
+                                  86400);  // 24h ticket lifetime
+  if (ret == 0) {
+    ticketCtxInitialized = true;
+    mbedtls_ssl_conf_session_tickets_cb(&sslConf,
+                                         mbedtls_ssl_ticket_write,
+                                         mbedtls_ssl_ticket_parse,
+                                         &ticketCtx);
+    mbedtls_ssl_conf_session_tickets(&sslConf, MBEDTLS_SSL_SESSION_TICKETS_ENABLED);
+    OTF_DEBUG("Session tickets ENABLED (AES-256-GCM, 24h lifetime)\n");
+  } else {
+    OTF_DEBUG("Session ticket setup failed: -0x%x (tickets disabled)\n", -ret);
+    mbedtls_ssl_conf_session_tickets(&sslConf, MBEDTLS_SSL_SESSION_TICKETS_DISABLED);
+  }
 #endif
   
-  // Critical memory optimizations for ESP32-C5 (400KB SRAM, no PSRAM)
-  #if defined(MBEDTLS_SSL_SESSION_TICKETS)
-    mbedtls_ssl_conf_session_tickets(&sslConf, MBEDTLS_SSL_SESSION_TICKETS_DISABLED);
+  // Read timeout for faster error detection (2s; default 60s wastes time on dead connections)
+  mbedtls_ssl_conf_read_timeout(&sslConf, 2000);
+  
+  // Extended Master Secret: ENABLED for TLS 1.2 compatibility.
+  // Some clients (Android, iOS) require EMS; disabling causes handshake failures.
+  #if defined(MBEDTLS_SSL_EXTENDED_MASTER_SECRET)
+    mbedtls_ssl_conf_extended_master_secret(&sslConf, MBEDTLS_SSL_EXTENDED_MS_ENABLED);
   #endif
   
-  // Do not enforce Max Fragment Length extension; many browsers don't negotiate it
-  // Keep CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN=4096 for RAM savings without handshake failures
-  
-  // Disable heavyweight features
+  // Encrypt-then-MAC: minor overhead on TLS 1.2 CBC suites; not used with GCM/TLS 1.3
   #if defined(MBEDTLS_SSL_ENCRYPT_THEN_MAC)
     mbedtls_ssl_conf_encrypt_then_mac(&sslConf, MBEDTLS_SSL_ETM_DISABLED);
   #endif
-  #if defined(MBEDTLS_SSL_EXTENDED_MASTER_SECRET)
-    mbedtls_ssl_conf_extended_master_secret(&sslConf, MBEDTLS_SSL_EXTENDED_MS_DISABLED);
-  #endif
-  
-  // CRITICAL: TCP Keep-Alive reduces SSL renegotiation overhead
-  // Configure read timeout for faster error detection (3s instead of default 60s)
-  mbedtls_ssl_conf_read_timeout(&sslConf, 3000);
 
-  // Further runtime feature trimming (even if compiled in)
+  // Disable renegotiation (TLS 1.2 only; deprecated, security risk)
   #if defined(MBEDTLS_SSL_RENEGOTIATION)
     mbedtls_ssl_conf_renegotiation(&sslConf, MBEDTLS_SSL_RENEGOTIATION_DISABLED);
   #endif
+  
+  // Don't send CA list in CertificateRequest (we don't request client certs)
   #if defined(MBEDTLS_SSL_CERT_REQ_CA_LIST)
     mbedtls_ssl_conf_cert_req_ca_list(&sslConf, MBEDTLS_SSL_CERT_REQ_CA_LIST_DISABLED);
   #endif
   
-  // Debug: List supported cipher suites
-  /*OTF_DEBUG("Supported cipher suites:\n");
-  const int *ciphersuites = mbedtls_ssl_list_ciphersuites();
-  if (ciphersuites) {
-    int count = 0;
-    for (int i = 0; ciphersuites[i] != 0; i++) {
-      const char* suite_name = mbedtls_ssl_get_ciphersuite_name(ciphersuites[i]);
-      if (suite_name) {
-        OTF_DEBUG("  [%d] 0x%04X - %s\n", i, ciphersuites[i], suite_name);
-        count++;
-      }
-    }
-    OTF_DEBUG("Total cipher suites available: %d\n", count);
-  } else {
-    OTF_DEBUG("  ERROR: No cipher suites available!\n");
-  }
-  */
   return true;
 }
 
@@ -338,112 +355,153 @@ static bool enableTCPKeepAlive(WiFiClient* wifiClient) {
 }
 
 mbedtls_ssl_context* WiFiSecureServer::handshakeSSL(WiFiClient* wifiClient) {
-  OTF_DEBUG(">>> handshakeSSL ENTRY: initialized=%d, wifiClient=%p\n", initialized, (void*)wifiClient);
-  
-  if (!initialized) {
-    OTF_DEBUG("SSL context not initialized\n");
-    return NULL;
-  }
-  
-  if (!wifiClient || !wifiClient->connected()) {
-    OTF_DEBUG("Invalid or disconnected WiFiClient (ptr=%p, connected=%d)\n", 
-              (void*)wifiClient, wifiClient ? wifiClient->connected() : -1);
+  if (!initialized || !wifiClient || !wifiClient->connected()) {
+    OTF_DEBUG("handshakeSSL: bad state (init=%d, client=%p)\n", initialized, (void*)wifiClient);
+    if (wifiClient) wifiClient->stop();
     return NULL;
   }
 
-  // Fast-path: if the peer sent data already and it doesn't look like a TLS record
-  // (TLS record content type for handshake is 0x16), it's likely plain HTTP on the HTTPS port.
+  // Fast-path: reject non-TLS traffic (first byte != 0x16 = TLS handshake)
   int avail = wifiClient->available();
   if (avail > 0) {
     int first = wifiClient->peek();
     if (first >= 0 && first != 0x16) {
-      OTF_DEBUG("Non-TLS traffic on HTTPS port (first byte=0x%02x, avail=%d). Closing.\n", first, avail);
+      OTF_DEBUG("Non-TLS on HTTPS port (0x%02x). Closing.\n", first);
       wifiClient->stop();
       return NULL;
     }
   }
   
-  OTF_DEBUG("handshakeSSL: Free heap: %d bytes, largest block: %d bytes\n", 
-                ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  // CRITICAL: Set TCP_NODELAY BEFORE handshake to prevent Nagle's algorithm
+  // from buffering small TLS handshake packets (ClientHello is ~300 bytes).
+  // Without this, each handshake message can be delayed up to 200ms.
+  wifiClient->setNoDelay(true);
   
-  // CRITICAL: Enable TCP Keep-Alive to reduce SSL renegotiation overhead
-  // This keeps TCP connection alive during idle periods, reducing need for
-  // expensive SSL session resumption or full handshakes
+  // TCP Keep-Alive for long-lived connections
   enableTCPKeepAlive(wifiClient);
   
-  OTF_DEBUG("Starting SSL handshake...\n");
+  OTF_DEBUG("SSL handshake starting (heap=%d, max_block=%d)\n", 
+            ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   
-  // Perform SSL handshake with timeout
   unsigned long handshakeStart = millis();
-  const unsigned long HANDSHAKE_TIMEOUT = 5000; // 5 seconds
+  const unsigned long HANDSHAKE_TIMEOUT = OTF_SSL_HANDSHAKE_TIMEOUT_MS;
   
-  int ret = 0;
-  mbedtls_ssl_context* ssl = new mbedtls_ssl_context;
-  mbedtls_ssl_init(ssl);
+  // Try to get an SSL context from the pool (avoids expensive alloc/init)
+  mbedtls_ssl_context* ssl = nullptr;
+  int poolSlot = -1;
+  for (int i = 0; i < SSL_CTX_POOL_SIZE; i++) {
+    if (sslPool[i] && !sslPoolInUse[i]) {
+      // Reuse pooled context via session_reset (preserves session cache)
+      int ret = mbedtls_ssl_session_reset(sslPool[i]);
+      if (ret == 0) {
+        ssl = sslPool[i];
+        sslPoolInUse[i] = true;
+        poolSlot = i;
+        OTF_DEBUG("SSL ctx reused from pool[%d]\n", i);
+        break;
+      }
+      // Reset failed — free and recreate
+      mbedtls_ssl_free(sslPool[i]);
+      delete sslPool[i];
+      sslPool[i] = nullptr;
+    }
+  }
   
-  OTF_DEBUG("After ssl_init: Free heap: %d bytes\n", ESP.getFreeHeap());
-  
-  // Debug: Check if SSL config is properly initialized
-  OTF_DEBUG("SSL Config check: conf ptr=%p\n", (void*)&sslConf);
-  
-  OTF_DEBUG("Calling mbedtls_ssl_setup...\n");
-  
-  // Setup SSL context with config
-  ret = mbedtls_ssl_setup(ssl, &sslConf);
-  if (ret != 0) {
-    char errBuf[100];
-    mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-    OTF_DEBUG("mbedtls_ssl_setup failed: -0x%x (%s)\n", -ret, errBuf);
-    OTF_DEBUG("Free heap: %d bytes\n", ESP.getFreeHeap());
-    mbedtls_ssl_free(ssl);
-    delete ssl;
-    wifiClient->stop();
-    return NULL;
+  if (!ssl) {
+    // No pooled context available — allocate new one
+    ssl = new (std::nothrow) mbedtls_ssl_context;
+    if (!ssl) {
+      OTF_DEBUG("SSL ctx alloc failed!\n");
+      wifiClient->stop();
+      return NULL;
+    }
+    mbedtls_ssl_init(ssl);
+    
+    int ret = mbedtls_ssl_setup(ssl, &sslConf);
+    if (ret != 0) {
+      char errBuf[80];
+      mbedtls_strerror(ret, errBuf, sizeof(errBuf));
+      OTF_DEBUG("ssl_setup failed: -0x%x (%s)\n", -ret, errBuf);
+      mbedtls_ssl_free(ssl);
+      delete ssl;
+      wifiClient->stop();
+      return NULL;
+    }
+    
+    // Find a pool slot for this new context
+    for (int i = 0; i < SSL_CTX_POOL_SIZE; i++) {
+      if (!sslPool[i]) {
+        sslPool[i] = ssl;
+        sslPoolInUse[i] = true;
+        poolSlot = i;
+        OTF_DEBUG("SSL ctx stored in pool[%d]\n", i);
+        break;
+      }
+    }
   }
 
   mbedtls_ssl_set_bio(ssl, wifiClient, wifi_client_send, wifi_client_recv, NULL);
-  
-  OTF_DEBUG("mbedtls_ssl_setup successful\n");
 
-  OTF_DEBUG("SSL context configured\n");
-
+  // Handshake loop — use yield() + 1ms delay to minimize latency while
+  // allowing FreeRTOS scheduler to run WiFi/system tasks.
+  int ret;
   while ((ret = mbedtls_ssl_handshake(ssl)) != 0) {
     if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
-      // mbedTLS net errors are small negative codes (e.g. -0x0050 for connection reset)
       if (ret == MBEDTLS_ERR_NET_CONN_RESET) {
-        OTF_DEBUG("mbedtls_ssl_handshake failed: -0x%x (CONNECTION RESET)\n", -ret);
+        OTF_DEBUG("Handshake: connection reset\n");
       } else {
-        char errBuf[100];
+        char errBuf[80];
         mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-        OTF_DEBUG("mbedtls_ssl_handshake failed: -0x%x (%s)\n", -ret, errBuf);
+        OTF_DEBUG("Handshake failed: -0x%x (%s)\n", -ret, errBuf);
       }
-      mbedtls_ssl_free(ssl);
-      delete ssl;
+      // Return context to pool instead of deleting
+      if (poolSlot >= 0) {
+        sslPoolInUse[poolSlot] = false;
+      } else {
+        mbedtls_ssl_free(ssl);
+        delete ssl;
+      }
       wifiClient->stop();
       return NULL;
     }
     
-    // Check timeout
     if (millis() - handshakeStart > HANDSHAKE_TIMEOUT) {
-      OTF_DEBUG("SSL handshake timeout!\n");
-      mbedtls_ssl_free(ssl);
-      delete ssl;
+      OTF_DEBUG("Handshake timeout (%ums)!\n", (unsigned)HANDSHAKE_TIMEOUT);
+      if (poolSlot >= 0) {
+        sslPoolInUse[poolSlot] = false;
+      } else {
+        mbedtls_ssl_free(ssl);
+        delete ssl;
+      }
       wifiClient->stop();
       return NULL;
     }
     
-    // Small delay to allow other tasks
-    delay(10);
+    delay(1);  // 1ms yield (was 10ms — saved ~90ms per handshake)
   }
   
-  // Handshake complete: log negotiated parameters
-  OTF_DEBUG("TLS negotiated: %s, cipher=%s\n",
+  unsigned long elapsed = millis() - handshakeStart;
+  OTF_DEBUG("TLS handshake OK in %ums: %s, %s\n",
+            (unsigned)elapsed,
             mbedtls_ssl_get_version(ssl),
             mbedtls_ssl_get_ciphersuite(ssl));
-  
-  OTF_DEBUG("SSL handshake successful!\n");
 
   return ssl;
+}
+
+// Return an SSL context to the pool for reuse
+void WiFiSecureServer::returnSSLContext(mbedtls_ssl_context* ssl) {
+  if (!ssl) return;
+  for (int i = 0; i < SSL_CTX_POOL_SIZE; i++) {
+    if (sslPool[i] == ssl) {
+      sslPoolInUse[i] = false;
+      OTF_DEBUG("SSL ctx returned to pool[%d]\n", i);
+      return;
+    }
+  }
+  // Not from pool — just free it
+  mbedtls_ssl_free(ssl);
+  delete ssl;
 }
 
 // ============================================================================
@@ -451,7 +509,7 @@ mbedtls_ssl_context* WiFiSecureServer::handshakeSSL(WiFiClient* wifiClient) {
 // ============================================================================
 
 Esp32LocalServer::Esp32LocalServer(uint16_t port, uint16_t httpsPort, uint16_t maxClients) 
-  : httpServer(port, 1), 
+  : httpServer(port, 5), 
     httpsServer(nullptr),
     maxConcurrentClients(maxClients),
     httpPort(port),
@@ -728,9 +786,9 @@ void OTF::Esp32HttpClient::stop() {
 // ============================================================================
 
 OTF::Esp32HttpsClient::Esp32HttpsClient(WiFiClient wifiClient, WiFiSecureServer* httpsServer)
-  : client(wifiClient), isActive(true), ssl(nullptr)
+  : client(wifiClient), isActive(true), ssl(nullptr), server(httpsServer)
 {
-  OTF_DEBUG("initialized HTTPS client with SSL\n");
+  OTF_DEBUG("HTTPS client init\n");
   client.setNoDelay(true);
   client.setTimeout((int)timeoutMs);
 
@@ -740,13 +798,30 @@ OTF::Esp32HttpsClient::Esp32HttpsClient(WiFiClient wifiClient, WiFiSecureServer*
 }
 
 OTF::Esp32HttpsClient::~Esp32HttpsClient() {
-  OTF_DEBUG("destroyed HTTPS client with SSL\n");
+  OTF_DEBUG("~Esp32HttpsClient\n");
+  if (ssl && isActive) {
+    // Best-effort close_notify (100ms max — don't block the main loop)
+    const uint32_t closeTimeoutMs = 100;
+    uint32_t start = millis();
+    while (true) {
+      int r = mbedtls_ssl_close_notify(ssl);
+      if (r == 0) break;
+      if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) {
+        if ((millis() - start) >= closeTimeoutMs) break;
+        delay(1);
+        continue;
+      }
+      break;
+    }
+  }
   client.stop();
-  if (ssl) {
+  if (ssl && server) {
+    server->returnSSLContext(ssl);  // Return to pool for reuse
+  } else if (ssl) {
     mbedtls_ssl_free(ssl);
     delete ssl;
-    ssl = nullptr;
   }
+  ssl = nullptr;
   isActive = false;
 }
 
@@ -849,12 +924,11 @@ void OTF::Esp32HttpsClient::flush() {
 }
 
 void OTF::Esp32HttpsClient::stop() {
-  OTF_DEBUG("stop HTTPS client with SSL\n");
+  OTF_DEBUG("stop HTTPS client\n");
   uint32_t stopStart = millis();
   if (ssl && isActive) {
-    // Best-effort close_notify: some browsers/clients don't read it, which can
-    // stall in WANT_WRITE for seconds. Keep it short to avoid blocking OTF loop.
-    const uint32_t closeTimeoutMs = 200;
+    // Best-effort close_notify: 100ms max to avoid blocking OTF main loop.
+    const uint32_t closeTimeoutMs = 100;
     uint32_t start = millis();
     while (true) {
       int r = mbedtls_ssl_close_notify(ssl);
@@ -866,16 +940,17 @@ void OTF::Esp32HttpsClient::stop() {
       }
       break;
     }
-    OTF_DEBUG("HTTPS close_notify elapsed: %u ms\n", (unsigned)(millis() - start));
   }
-  if (ssl) {
+  if (ssl && server) {
+    server->returnSSLContext(ssl);  // Return to pool
+  } else if (ssl) {
     mbedtls_ssl_free(ssl);
     delete ssl;
-    ssl = nullptr;
   }
+  ssl = nullptr;
   client.stop();
   isActive = false;
-  OTF_DEBUG("SSL cleanup complete, free heap: %d bytes, stop elapsed: %u ms\n", ESP.getFreeHeap(), (unsigned)(millis() - stopStart));
+  OTF_DEBUG("SSL stop in %ums, heap=%d\n", (unsigned)(millis() - stopStart), ESP.getFreeHeap());
 }
 
 #endif

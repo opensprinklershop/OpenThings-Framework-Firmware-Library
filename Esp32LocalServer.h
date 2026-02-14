@@ -15,6 +15,9 @@
 #include <mbedtls/pk.h>
 #include <mbedtls/net_sockets.h>
 #include <mbedtls/error.h>
+#if defined(MBEDTLS_SSL_SESSION_TICKETS)
+#include <mbedtls/ssl_ticket.h>
+#endif
 #include <vector>
 #include <memory>
 
@@ -42,6 +45,14 @@ private:
   mbedtls_pk_context serverKey;
   mbedtls_entropy_context entropy;
   mbedtls_ctr_drbg_context ctrDrbg;
+#if defined(MBEDTLS_SSL_SESSION_TICKETS)
+  mbedtls_ssl_ticket_context ticketCtx;
+  bool ticketCtxInitialized;
+#endif
+  // SSL context pool for reuse (avoids new/delete per connection)
+  static constexpr uint8_t SSL_CTX_POOL_SIZE = 3;
+  mbedtls_ssl_context* sslPool[SSL_CTX_POOL_SIZE];
+  bool sslPoolInUse[SSL_CTX_POOL_SIZE];
   uint16_t port;
   const unsigned char* certData;
   uint16_t certLength;
@@ -59,6 +70,7 @@ public:
   bool begin();
   WiFiClient accept();
   mbedtls_ssl_context* handshakeSSL(WiFiClient* wifiClient);
+  void returnSSLContext(mbedtls_ssl_context* ssl);  // Return SSL context to pool
   
   mbedtls_ssl_config* getSSLConfig() { return &sslConf; }
 };
@@ -95,6 +107,7 @@ public:
   private:
     WiFiClient client;           // Base WiFiClient
     mbedtls_ssl_context *ssl;
+    WiFiSecureServer *server;      // For returning SSL ctx to pool
     bool isActive;
     // Used for mbedTLS read/write retry loops.
     uint32_t timeoutMs = 5000;
