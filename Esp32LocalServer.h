@@ -18,20 +18,10 @@
 #if defined(MBEDTLS_SSL_SESSION_TICKETS)
 #include <mbedtls/ssl_ticket.h>
 #endif
-#include <vector>
-#include <memory>
-
 // Include self-signed certificate data
 #include "cert.h"
 
-// ============================================================================
-// Configuration for MultiClient Support
-// ============================================================================
-#define OTF_MAX_CONCURRENT_CLIENTS 4     // Maximum simultaneous connections
-#define OTF_CLIENT_POOL_SIZE 6           // Pool size for better resource allocation
-#define OTF_USE_PSRAM 1                  // Enable PSRAM usage for buffers (if available)
-#define OTF_CLIENT_READ_BUFFER_SIZE 4096 // Size of PSRAM/DRAM read buffer per client
-#define OTF_CLIENT_WRITE_BUFFER_SIZE 8192// Size of buffered write per client
+// Single-client stateless design: accept one connection, handle it, close it.
 
 namespace OTF {
 
@@ -134,36 +124,19 @@ public:
   private:
     WiFiServer httpServer;              // HTTP server on port 80
     WiFiSecureServer* httpsServer;      // HTTPS server on port 443 with SSL/TLS
-    
-    // Connection Pool Management
-    std::vector<LocalClient*> clientPool;  // Pool of active clients
-    LocalClient *currentClient = nullptr;  // Current active client for backward compatibility
-    uint16_t maxConcurrentClients;
-    uint16_t nextClientIndex = 0;       // Round-robin client selection
+    LocalClient *currentClient = nullptr;
     
     uint16_t httpPort;
     uint16_t httpsPort;
-    bool currentRequestIsHttps = false; // Flag for current request type
-    
-    // Helper methods for connection pool management
-    LocalClient* getNextAvailableClient();
-    void cleanupInactiveClients();
-    size_t getActiveClientCount() const;
+    bool currentRequestIsHttps = false;
 
   public:
-    Esp32LocalServer(uint16_t port = 80, uint16_t httpsPort = 443, uint16_t maxClients = OTF_MAX_CONCURRENT_CLIENTS);
+    Esp32LocalServer(uint16_t port = 80, uint16_t httpsPort = 443);
     ~Esp32LocalServer();
 
     LocalClient *acceptClient();
     void begin();
     bool isCurrentRequestHttps() const override { return currentRequestIsHttps; }
-    
-    // New API for multi-client support
-    LocalClient *acceptClientNonBlocking();  // Non-blocking accept (returns nullptr if no new clients)
-    LocalClient *getClientAtIndex(uint16_t index);  // Get specific client from pool
-    uint16_t getActiveClientCount();         // Returns number of active clients
-    void removeClient(LocalClient* client);  // Remove and delete client from pool
-    void closeAllClients();                  // Close all active connections
   };
 }// namespace OTF
 

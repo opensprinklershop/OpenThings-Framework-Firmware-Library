@@ -118,12 +118,7 @@ void OpenThingsFramework::localServerLoop() {
       wait_to=0;
       localClient->flush();
       localClient->stop();
-      
-      // Remove timed-out client from pool
-      #if defined(ARDUINO) && defined(ESP32)
-      localServer.removeClient(localClient);
       localClient = nullptr;
-      #endif
     }
     return;
   }
@@ -144,8 +139,9 @@ void OpenThingsFramework::localServerLoop() {
   while (millis() < timeout) {
     if (length >= (size_t)headerBufferSize - 1) {
       localClient->print(F("HTTP/1.1 413 Request too large\r\n\r\nThe request was too large"));
-      // Get a new client to indicate that the previous client is no longer needed.
-      localClient = localServer.acceptClient();
+      localClient->flush();
+      localClient->stop();
+      localClient = nullptr;
       return;
     }
 
@@ -263,21 +259,9 @@ void OpenThingsFramework::localServerLoop() {
   // Properly close the client connection.
   localClient->flush();
   localClient->stop();
-  
-  // WICHTIG: Remove client from pool after closing
-  #if defined(ARDUINO) && defined(ESP32)
-  OTF_DEBUG(F("Removing client from pool...\n"));
-  localServer.removeClient(localClient);
   localClient = nullptr;
-  #endif
 
-  // Get a new client to indicate that the previous client is no longer needed.
-  localClient = localServer.acceptClient();
-  if (localClient) {
-    OTF_DEBUG(F("Accepted new client\n"));
-    wait_to = millis()+WIFI_CONNECTION_TIMEOUT;
-  }
-
+  // localClient is now null — next loop iteration will accept a new one
   OTF_DEBUG(F("Finished handling request\n"));
 }
 

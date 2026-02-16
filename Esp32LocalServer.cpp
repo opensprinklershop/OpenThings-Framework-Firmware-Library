@@ -6,9 +6,7 @@
 #endif
 #include "Esp32LocalServer.h"
 #include "Esp32LocalServer_Config.h"
-#include <lwip/sockets.h>  // For sockaddr_in
 #include <mbedtls/error.h>  // For mbedtls_strerror
-#include <esp_heap_caps.h>  // For heap_caps_malloc/free with PSRAM support
 
 #ifndef OTF_DEBUG
   #if defined(SERIAL_DEBUG) || defined(OTF_DEBUG_MODE)
@@ -21,51 +19,6 @@
 
 // Use namespace OTF for all class implementations
 using namespace OTF;
-
-// ============================================================================
-// Memory Optimization Helpers for PSRAM Support
-// ============================================================================
-inline void* otf_malloc(size_t size, bool preferPSRAM = true) {
-#if OTF_USE_PSRAM
-  if (preferPSRAM && psramFound()) {
-    // Use heap_caps_malloc for better control over PSRAM allocation
-    void* ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (ptr) {
-      #ifdef OTF_DEBUG_MEMORY
-      OTF_DEBUG("PSRAM malloc: %u bytes\n", (unsigned)size);
-      #endif
-      return ptr;
-    }
-    // PSRAM allocation failed - fall through to DRAM
-    #ifdef OTF_DEBUG_MEMORY
-    OTF_DEBUG("PSRAM malloc failed, trying DRAM for %u bytes\n", (unsigned)size);
-    #endif
-  }
-#endif
-  void* ptr = malloc(size);
-  if (ptr) {
-    #ifdef OTF_DEBUG_MEMORY
-    OTF_DEBUG("DRAM malloc: %u bytes\n", (unsigned)size);
-    #endif
-  }
-  return ptr;
-}
-
-inline void otf_free(void* ptr) {
-  if (ptr) {
-    // heap_caps_free works for both PSRAM and DRAM
-    heap_caps_free(ptr);
-  }
-}
-
-// ============================================================================
-// Enhanced HTTP Client with Buffering (supports PSRAM)
-// ============================================================================
-
-// NOTE: Esp32HttpClientBuffered removed due to private base constructor.
-// If buffered writes are needed later, implement via composition inside Esp32LocalServer
-// and keep Esp32HttpClient constructors private for controlled instantiation.
-// Note: Buffered client class removed - simplicity preferred for embedded systems
 
 static int wifi_client_send(void *ctx, const unsigned char *buf, size_t len) {
   WiFiClient *client = static_cast<WiFiClient*>(ctx);
@@ -313,47 +266,6 @@ WiFiClient WiFiSecureServer::accept() {
 // Note: Direct buffering removed - simplicity preferred for embedded systems
 // Clients are managed directly by Esp32LocalServer
 
-// Helper to enable TCP Keep-Alive on WiFiClient socket (reduces SSL renegotiation)
-static bool enableTCPKeepAlive(WiFiClient* wifiClient) {
-  if (!wifiClient || !wifiClient->connected()) return false;
-  
-  // Get socket FD from WiFiClient
-  int sockfd = wifiClient->fd();
-  if (sockfd < 0) {
-    OTF_DEBUG("Invalid socket FD\n");
-    return false;
-  }
-  
-  // Enable TCP Keep-Alive (SO_KEEPALIVE)
-  int keepalive = 1;
-  if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive)) < 0) {
-    OTF_DEBUG("Failed to enable SO_KEEPALIVE: %s\n", strerror(errno));
-    return false;
-  }
-  
-  // TCP_KEEPIDLE: Time before sending first keepalive probe (seconds)
-  int keepidle = 30;  // 30 seconds idle before first probe
-  if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle)) < 0) {
-    OTF_DEBUG("Failed to set TCP_KEEPIDLE: %s\n", strerror(errno));
-  }
-  
-  // TCP_KEEPINTVL: Interval between keepalive probes (seconds)
-  int keepintvl = 10;  // 10 seconds between probes
-  if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl)) < 0) {
-    OTF_DEBUG("Failed to set TCP_KEEPINTVL: %s\n", strerror(errno));
-  }
-  
-  // TCP_KEEPCNT: Number of probes before closing connection
-  int keepcnt = 3;  // 3 failed probes = close
-  if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt)) < 0) {
-    OTF_DEBUG("Failed to set TCP_KEEPCNT: %s\n", strerror(errno));
-  }
-  
-  OTF_DEBUG("TCP Keep-Alive enabled (idle=%ds, intvl=%ds, cnt=%d)\n", 
-            keepidle, keepintvl, keepcnt);
-  return true;
-}
-
 mbedtls_ssl_context* WiFiSecureServer::handshakeSSL(WiFiClient* wifiClient) {
   if (!initialized || !wifiClient || !wifiClient->connected()) {
     OTF_DEBUG("handshakeSSL: bad state (init=%d, client=%p)\n", initialized, (void*)wifiClient);
@@ -376,9 +288,6 @@ mbedtls_ssl_context* WiFiSecureServer::handshakeSSL(WiFiClient* wifiClient) {
   // from buffering small TLS handshake packets (ClientHello is ~300 bytes).
   // Without this, each handshake message can be delayed up to 200ms.
   wifiClient->setNoDelay(true);
-  
-  // TCP Keep-Alive for long-lived connections
-  enableTCPKeepAlive(wifiClient);
   
   OTF_DEBUG("SSL handshake starting (heap=%d, max_block=%d)\n", 
             ESP.getFreeHeap(), ESP.getMaxAllocHeap());
@@ -505,32 +414,19 @@ void WiFiSecureServer::returnSSLContext(mbedtls_ssl_context* ssl) {
 }
 
 // ============================================================================
-// Esp32LocalServer Implementation with Connection Pool
+// Esp32LocalServer — Single-Client Stateless Implementation
 // ============================================================================
 
-Esp32LocalServer::Esp32LocalServer(uint16_t port, uint16_t httpsPort, uint16_t maxClients) 
-  : httpServer(port, 5), 
+Esp32LocalServer::Esp32LocalServer(uint16_t port, uint16_t httpsPort) 
+  : httpServer(port, 1),    // backlog=1 — only one pending connection
     httpsServer(nullptr),
-    maxConcurrentClients(maxClients),
     httpPort(port),
     httpsPort(httpsPort) {
   
-  OTF_DEBUG("Initializing Esp32LocalServer (MultiClient Support)\n");
-  OTF_DEBUG("  HTTP port: %d\n", httpPort);
-  OTF_DEBUG("  HTTPS port: %d\n", httpsPort);
-  OTF_DEBUG("  Max concurrent clients: %d\n", maxConcurrentClients);
-  OTF_DEBUG("  PSRAM support: %s\n", psramFound() ? "YES" : "NO");
-  OTF_DEBUG("  Free DRAM: %d bytes, Free PSRAM: %d bytes\n", 
-            ESP.getFreeHeap(), ESP.getFreePsram());
+  OTF_DEBUG("Initializing Esp32LocalServer (single-client, stateless)\n");
+  OTF_DEBUG("  HTTP port: %d, HTTPS port: %d\n", httpPort, httpsPort);
   
-  // Preallocate client pool
-  clientPool.reserve(OTF_CLIENT_POOL_SIZE);
-  
-  // Create HTTPS server with certificate from cert.h
-  if (httpsPort == 0) {
-    OTF_DEBUG("HTTPS port is 0, skipping HTTPS server setup\n");
-    return;
-  }
+  if (httpsPort == 0) return;
   httpsServer = new WiFiSecureServer(
     httpsPort, 
     opensprinkler_crt_DER, opensprinkler_crt_DER_len,
@@ -539,7 +435,11 @@ Esp32LocalServer::Esp32LocalServer(uint16_t port, uint16_t httpsPort, uint16_t m
 }
 
 Esp32LocalServer::~Esp32LocalServer() {
-  closeAllClients();
+  if (currentClient) {
+    currentClient->stop();
+    delete currentClient;
+    currentClient = nullptr;
+  }
   if (httpsServer) {
     delete httpsServer;
     httpsServer = nullptr;
@@ -547,172 +447,50 @@ Esp32LocalServer::~Esp32LocalServer() {
 }
 
 void Esp32LocalServer::begin() {
-  OTF_DEBUG("[Esp32LocalServer::begin] Called!\n");
-  OTF_DEBUG("[Esp32LocalServer::begin] httpPort=%d, httpsPort=%d\n", httpPort, httpsPort);
-  
-  // Start HTTP server
-  OTF_DEBUG("[Esp32LocalServer::begin] Starting HTTP server...\n");
   httpServer.begin();
   OTF_DEBUG("HTTP server listening on port %d\n", httpPort);
   
-  // Start HTTPS server
   if (httpsServer) {
-    OTF_DEBUG("[Esp32LocalServer::begin] HTTPS server exists, calling begin()...\n");
     if (httpsServer->begin()) {
       OTF_DEBUG("HTTPS server listening on port %d\n", httpsPort);
     } else {
       OTF_DEBUG("WARNING: HTTPS server failed to start\n");
     }
-  } else {
-    OTF_DEBUG("[Esp32LocalServer::begin] No HTTPS server (httpsPort=%d)\n", httpsPort);
   }
-  OTF_DEBUG("[Esp32LocalServer::begin] Completed!\n");
-}
-
-size_t Esp32LocalServer::getActiveClientCount() const {
-  return clientPool.size();
-}
-
-void Esp32LocalServer::removeClient(LocalClient* client) {
-  if (!client) return;
-  
-  for (auto it = clientPool.begin(); it != clientPool.end(); ++it) {
-    if (*it == client) {
-      delete *it;
-      clientPool.erase(it);
-      if (currentClient == client) {
-        currentClient = nullptr;
-      }
-      return;
-    }
-  }
-}
-
-void Esp32LocalServer::cleanupInactiveClients() {
-  // Remove clients that have been stopped/closed
-  for (auto it = clientPool.begin(); it != clientPool.end(); ) {
-    LocalClient* client = *it;
-
-    bool shouldRemove = false;
-    if (!client) {
-      shouldRemove = true;
-    } else if (!client->connected()) {
-      shouldRemove = true;
-    }
-
-    if (shouldRemove) {
-      if (client == currentClient) {
-        currentClient = nullptr;
-      }
-
-      if (client) {
-        delete client;
-      }
-      it = clientPool.erase(it);
-    } else {
-      ++it;
-    }
-  }
-}
-
-LocalClient* Esp32LocalServer::getNextAvailableClient() {
-  if (clientPool.empty()) return nullptr;
-  
-  // Round-robin selection
-  if (nextClientIndex >= clientPool.size()) {
-    nextClientIndex = 0;
-  }
-  
-  return clientPool[nextClientIndex++];
-}
-
-LocalClient *Esp32LocalServer::acceptClientNonBlocking() {
-  // Attempt to accept a new HTTP connection
-  WiFiClient httpClient = httpServer.accept();
-  if (httpClient) {
-    // Check if we've hit the max concurrent clients limit
-    if (clientPool.size() >= maxConcurrentClients) {
-      OTF_DEBUG("Max clients reached (%d), rejecting new HTTP connection\n", maxConcurrentClients);
-      httpClient.stop();
-      return nullptr;
-    }
-    
-    OTF_DEBUG("HTTP client connected (pool size: %d)\n", clientPool.size() + 1);
-    currentRequestIsHttps = false;
-    LocalClient* newClient = new Esp32HttpClient(httpClient);
-    clientPool.push_back(newClient);
-    currentClient = newClient;
-    return newClient;
-  }
-
-  // Attempt to accept a new HTTPS connection
-  if (httpsServer) {    
-    WiFiClient wifiClient = httpsServer->accept();
-    if (wifiClient) {
-      // Check if we've hit the max concurrent clients limit
-      if (clientPool.size() >= maxConcurrentClients) {
-        OTF_DEBUG("Max clients reached (%d), rejecting new HTTPS connection\n", maxConcurrentClients);
-        wifiClient.stop();
-        return nullptr;
-      }
-      
-      OTF_DEBUG("HTTPS WiFiClient accepted, connected: %d (pool size: %d)\n", 
-                wifiClient.connected(), clientPool.size() + 1);
-      currentRequestIsHttps = true;
-      LocalClient* newClient = new Esp32HttpsClient(wifiClient, httpsServer);
-
-      if (!static_cast<Esp32HttpsClient*>(newClient)->isUsable()) {
-        delete newClient;
-        return nullptr;
-      }
-      
-      clientPool.push_back(newClient);
-      currentClient = newClient;
-      return newClient;
-    }
-  }
-
-  return nullptr;
 }
 
 LocalClient *Esp32LocalServer::acceptClient() {
-  // For backward compatibility: cleanup old single client pattern
-  // But now support multiple concurrent clients
-  
-  cleanupInactiveClients();
-  
-  // Try to accept a new client
-  LocalClient* newClient = acceptClientNonBlocking();
-  if (newClient) {
-    return newClient;
+  // Close and delete the previous client — fully stateless.
+  if (currentClient) {
+    currentClient->stop();
+    delete currentClient;
+    currentClient = nullptr;
   }
   
-  // Return current/next active client if available
-  if (!clientPool.empty()) {
-    currentClient = getNextAvailableClient();
+  // Try HTTP first
+  WiFiClient httpClient = httpServer.accept();
+  if (httpClient) {
+    currentRequestIsHttps = false;
+    currentClient = new Esp32HttpClient(httpClient);
     return currentClient;
   }
-  
-  return nullptr;
-}
 
-LocalClient *Esp32LocalServer::getClientAtIndex(uint16_t index) {
-  if (index < clientPool.size()) {
-    return clientPool[index];
-  }
-  return nullptr;
-}
-
-void Esp32LocalServer::closeAllClients() {
-  for (auto client : clientPool) {
-    if (client) {
-      client->stop();
-      delete client;
+  // Try HTTPS
+  if (httpsServer) {    
+    WiFiClient wifiClient = httpsServer->accept();
+    if (wifiClient) {
+      currentRequestIsHttps = true;
+      Esp32HttpsClient* httpsClient = new Esp32HttpsClient(wifiClient, httpsServer);
+      if (!httpsClient->isUsable()) {
+        delete httpsClient;
+        return nullptr;
+      }
+      currentClient = httpsClient;
+      return currentClient;
     }
   }
-  clientPool.clear();
-  currentClient = nullptr;
-  nextClientIndex = 0;
+
+  return nullptr;
 }
 
 // ============================================================================
@@ -721,12 +499,7 @@ void Esp32LocalServer::closeAllClients() {
 
 Esp32HttpClient::Esp32HttpClient(WiFiClient wifiClient) 
   : client(wifiClient), isActive(true) {
-  OTF_DEBUG("HTTP client initialized\n");
   client.setNoDelay(true);
-  
-  // Enable TCP Keep-Alive for HTTP clients to maintain connection
-  // during idle periods (reduces connection overhead)
-  enableTCPKeepAlive(&client);
 }
 
 OTF::Esp32HttpClient::~Esp32HttpClient() {
