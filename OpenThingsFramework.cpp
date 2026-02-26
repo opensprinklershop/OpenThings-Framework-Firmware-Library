@@ -2,6 +2,10 @@
 #include "StringBuilder.hpp"
 #include <string>
 
+#if defined(ARDUINO) && defined(ESP32)
+#include <esp_heap_caps.h>
+#endif
+
 // The timeout for reading and parsing incoming requests.
 #define WIFI_CONNECTION_TIMEOUT 1500
 /* How often to try to reconnect to the websocket if the connection is lost. Each reconnect attempt is blocking and has
@@ -27,8 +31,16 @@ OpenThingsFramework::OpenThingsFramework(uint16_t webServerPort, char *hdBuffer,
   if(hdBuffer != NULL) { // if header buffer is externally provided, use it directly
     headerBuffer = hdBuffer;
     headerBufferSize = (hdBufferSize > 0) ? hdBufferSize : HEADERS_BUFFER_SIZE;
-  } else { // otherwise allocate one
+  } else { // otherwise allocate from PSRAM if available, then heap
+#if defined(ARDUINO) && defined(ESP32)
+    headerBuffer = (char*)heap_caps_malloc(HEADERS_BUFFER_SIZE,
+                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!headerBuffer) {
+      headerBuffer = new char[HEADERS_BUFFER_SIZE];  // fallback to DRAM
+    }
+#else
     headerBuffer = new char[HEADERS_BUFFER_SIZE];
+#endif
     headerBufferSize = HEADERS_BUFFER_SIZE;
   }
   missingPageCallback = defaultMissingPageCallback;
