@@ -12,9 +12,7 @@
             "-<LinuxLocalServer.cpp>",
             "-<LinuxLocalServer.h>",
             "-<etherport.cpp>",
-            "-<etherport.h>",
-            "-<Esp8266LocalServer.cpp>",
-            "-<Esp8266LocalServer.h>"
+            "-<etherport.h>"
         ],
         "flags": [
             "-DARDUINO",
