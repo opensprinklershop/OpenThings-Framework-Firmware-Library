@@ -16,6 +16,8 @@
   #endif
 #endif
 
+// Custom certificate override pointers are defined in custom_cert.cpp
+// and declared extern in Esp32LocalServer.h
 
 // Use namespace OTF for all class implementations
 using namespace OTF;
@@ -427,11 +429,20 @@ Esp32LocalServer::Esp32LocalServer(uint16_t port, uint16_t httpsPort)
   OTF_DEBUG("  HTTP port: %d, HTTPS port: %d\n", httpPort, httpsPort);
   
   if (httpsPort == 0) return;
-  httpsServer = new WiFiSecureServer(
-    httpsPort, 
-    opensprinkler_crt_DER, opensprinkler_crt_DER_len,
-    opensprinkler_key_DER, opensprinkler_key_DER_len
-  );
+
+  // Use custom certificate if provided, otherwise fall back to built-in PROGMEM cert
+  const unsigned char* cert = otf_custom_cert_data ? otf_custom_cert_data : opensprinkler_crt_DER;
+  uint16_t certLen = otf_custom_cert_data ? otf_custom_cert_len : opensprinkler_crt_DER_len;
+  const unsigned char* key = otf_custom_key_data ? otf_custom_key_data : opensprinkler_key_DER;
+  uint16_t keyLen = otf_custom_key_data ? otf_custom_key_len : opensprinkler_key_DER_len;
+
+  if (otf_custom_cert_data) {
+    OTF_DEBUG("  Using custom certificate (%d bytes cert, %d bytes key)\n", certLen, keyLen);
+  } else {
+    OTF_DEBUG("  Using built-in certificate\n");
+  }
+
+  httpsServer = new WiFiSecureServer(httpsPort, cert, certLen, key, keyLen);
 }
 
 Esp32LocalServer::~Esp32LocalServer() {
