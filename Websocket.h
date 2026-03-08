@@ -14,6 +14,7 @@ typedef String WSInterfaceString;
 // If not available, WebSocket functionality will be disabled
 #include <sys/time.h>
 #include <functional>
+#include <string>
 typedef std::string WSInterfaceString;
 
 // Try to include if available, otherwise disable WebSocket
@@ -293,14 +294,14 @@ public:
    */
   void connect(WSInterfaceString host, int port, WSInterfaceString path);
 
-//   /**
-//    * @brief Connect to a websocket server using a secure connection
-//    * 
-//    * @param host String containing the host name or IP address of the server
-//    * @param port Port number to connect to
-//    * @param path Path to connect to on the server
-//    */
-//   void connectSecure(WSInterfaceString host, int port, WSInterfaceString path);
+  /**
+   * @brief Connect to a websocket server using a secure connection
+   * 
+   * @param host String containing the host name or IP address of the server
+   * @param port Port number to connect to
+   * @param path Path to connect to on the server
+   */
+  void connectSecure(WSInterfaceString host, int port, WSInterfaceString path);
 
   /**
    * @brief Close the connection to the websocket server
@@ -416,6 +417,7 @@ private:
   bool done = false;
 
   bool isStreaming = false;
+  bool isSecure = false;
 };
 
 #else // WEBSOCKET_ENABLED
