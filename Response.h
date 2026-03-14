@@ -12,7 +12,11 @@
 #endif
 
 // The maximum possible size of response messages.
+#if defined(ESP8266)
+#define RESPONSE_BUFFER_SIZE 1500
+#else
 #define RESPONSE_BUFFER_SIZE 4096
+#endif
 
 namespace OTF {
 

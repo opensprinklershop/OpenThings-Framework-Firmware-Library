@@ -1,10 +1,16 @@
 #include "StringBuilder.hpp"
+#include <new>
 
 using namespace OTF;
 
 StringBuilder::StringBuilder(size_t maxLength) {
   this->maxLength = maxLength;
-  buffer = new char[maxLength];
+  buffer = new(std::nothrow) char[maxLength];
+  if (!buffer) {
+    this->maxLength = 0;
+    valid = false;
+    return;
+  }
   buffer[0] = '\0';
 }
 
@@ -171,7 +177,9 @@ void StringBuilder::enableStream(stream_write_t write, stream_flush_t flush, str
 
 bool StringBuilder::end() {
   if (stream_end) {
-    stream_write(buffer, length, streaming);
+    if (buffer && length > 0) {
+      stream_write(buffer, length, streaming);
+    }
     stream_end();
     return true;
   }
@@ -179,6 +187,7 @@ bool StringBuilder::end() {
 }
 
 char *StringBuilder::toString() const {
+  if (!buffer) return nullptr;
   return &buffer[0];
 }
 
@@ -192,8 +201,8 @@ bool StringBuilder::isValid() {
 
 void StringBuilder::clear() {
   length = 0;
-  buffer[0] = '\0';
-  valid = true;
+  if (buffer) buffer[0] = '\0';
+  if (buffer) valid = true;
 }
 
 size_t StringBuilder::getMaxLength() const {
