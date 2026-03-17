@@ -15,7 +15,6 @@
             "-<etherport.h>"
         ],
         "flags": [
-            "-DARDUINO",
             "-DARDUINO_ESP32"
         ],
         "unflags": [

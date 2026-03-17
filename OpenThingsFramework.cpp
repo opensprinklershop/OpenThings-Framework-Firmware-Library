@@ -290,6 +290,19 @@ void OpenThingsFramework::pollCloud() {
   }
 }
 
+void OpenThingsFramework::disconnectCloud() {
+  if (webSocket != nullptr) {
+    webSocket->close();
+    webSocket->setReconnectInterval(3600000); // Suppress auto-reconnect (1 hour)
+  }
+}
+
+void OpenThingsFramework::reconnectCloud() {
+  if (webSocket != nullptr) {
+    webSocket->setReconnectInterval(WEBSOCKET_RECONNECT_INTERVAL); // Restore normal reconnect
+  }
+}
+
 void OpenThingsFramework::webSocketEventCallback(WSEvent_t type, uint8_t *payload, size_t length) {
   switch (type) {
     case WSEvent_DISCONNECTED: {

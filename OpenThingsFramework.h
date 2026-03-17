@@ -129,6 +129,12 @@ namespace OTF {
      */
     void pollCloud();
 
+    /** Disconnects the cloud WebSocket and suppresses auto-reconnect. Call before operations that need all available RAM (e.g. TLS email). */
+    void disconnectCloud();
+
+    /** Re-enables the cloud WebSocket auto-reconnect after a disconnectCloud() call. */
+    void reconnectCloud();
+
     /** Returns the current status of the connection to the OpenThings Cloud server. */
     CLOUD_STATUS getCloudStatus();
 
