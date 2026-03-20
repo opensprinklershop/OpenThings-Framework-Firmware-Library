@@ -220,8 +220,8 @@ void OpenThingsFramework::localServerLoop() {
       #endif
       // If the header specifies a length of 0 or could not be parsed, the message has no body.
       if (contentLength > 0) {
-        // Read the body from the client.
-        bodyBuffer = new char[contentLength];
+        // Read the body from the client (+1 for NUL terminator).
+        bodyBuffer = new char[contentLength + 1];
         size_t bodyLength = 0;
         timeout = millis()+WIFI_CONNECTION_TIMEOUT;
         while (localClient->dataAvailable() && millis()<timeout) {
