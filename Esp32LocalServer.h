@@ -74,6 +74,7 @@ public:
   ~WiFiSecureServer();
   
   bool begin();
+  void end();
   WiFiClient accept();
   mbedtls_ssl_context* handshakeSSL(WiFiClient* wifiClient);
   void returnSSLContext(mbedtls_ssl_context* ssl);  // Return SSL context to pool
@@ -152,6 +153,7 @@ public:
 
     LocalClient *acceptClient();
     void begin();
+    void stop();
     bool isCurrentRequestHttps() const override { return currentRequestIsHttps; }
   };
 }// namespace OTF

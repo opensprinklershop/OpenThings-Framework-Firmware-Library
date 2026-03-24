@@ -265,6 +265,11 @@ bool WiFiSecureServer::begin() {
 WiFiClient WiFiSecureServer::accept() {
   return server.accept();
 }
+
+void WiFiSecureServer::end() {
+  server.end();
+  OTF_DEBUG("WiFiSecureServer on port %d stopped\n", port);
+}
 // Note: Direct buffering removed - simplicity preferred for embedded systems
 // Clients are managed directly by Esp32LocalServer
 
@@ -467,6 +472,20 @@ void Esp32LocalServer::begin() {
     } else {
       OTF_DEBUG("WARNING: HTTPS server failed to start\n");
     }
+  }
+}
+
+void Esp32LocalServer::stop() {
+  if (currentClient) {
+    currentClient->stop();
+    delete currentClient;
+    currentClient = nullptr;
+  }
+  httpServer.end();
+  OTF_DEBUG("HTTP server on port %d stopped\n", httpPort);
+  if (httpsServer) {
+    httpsServer->end();
+    OTF_DEBUG("HTTPS server on port %d stopped\n", httpsPort);
   }
 }
 
