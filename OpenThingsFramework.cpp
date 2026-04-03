@@ -92,18 +92,25 @@ OpenThingsFramework::OpenThingsFramework(uint16_t webServerPort, const char* web
   webSocket->enableHeartbeat(15000, 5000, 1);
 }
 
-char *makeMapKey(StringBuilder *sb, OTFHTTPMethod method, const char *path) {
-  sb->bprintf(F("%d%s"), method, path);
-  return sb->toString();
+static void makeMapKeyBuf(char *dest, size_t destSize, OTFHTTPMethod method, const char *path) {
+  snprintf(dest, destSize, "%d%s", (int)method, path);
 }
 
 void OpenThingsFramework::on(const char *path, callback_t callback, OTFHTTPMethod method) {
-  callbacks.add(makeMapKey(new StringBuilder(KEY_MAX_LENGTH), method, path), callback);
+  size_t len = strlen(path) + 4; // method digits + path + \0
+  char *key = new char[len];
+  makeMapKeyBuf(key, len, method, path);
+  callbacks.add(key, callback);
 }
 
 #if defined(ARDUINO)
 void OpenThingsFramework::on(const __FlashStringHelper *path, callback_t callback, OTFHTTPMethod method) {
-  callbacks.add(makeMapKey(new StringBuilder(KEY_MAX_LENGTH), method, (char *) path), callback);
+  size_t pathLen = strlen_P((const char *)path);
+  size_t len = pathLen + 4;
+  char *key = new char[len];
+  int offset = snprintf(key, 4, "%d", (int)method);
+  strncpy_P(key + offset, (const char *)path, pathLen + 1);
+  callbacks.add(key, callback);
 }
 #endif
 
@@ -410,19 +417,15 @@ void OpenThingsFramework::fillResponse(const Request &req, Response &res) {
 
   // TODO handle trailing slash in path?
   OTF_DEBUG((char *) F("Attempting to route request to path '%s'\n"), req.getPath());
-  StringBuilder *sb = new StringBuilder(KEY_MAX_LENGTH);
-  char *key = makeMapKey(sb, req.httpMethod, req.getPath());
-  callback_t callback = callbacks.find(key);
+  char lookupKey[KEY_MAX_LENGTH];
+  makeMapKeyBuf(lookupKey, KEY_MAX_LENGTH, req.httpMethod, req.getPath());
+  callback_t callback = callbacks.find(lookupKey);
 
   // If there isn't a callback for the specific method, check if there's one for any method.
   if (callback == nullptr) {
-    delete sb;
-    sb = new StringBuilder(KEY_MAX_LENGTH);
-
-    callback = callbacks.find(makeMapKey(sb, OTF_HTTP_ANY, req.getPath()));
+    makeMapKeyBuf(lookupKey, KEY_MAX_LENGTH, OTF_HTTP_ANY, req.getPath());
+    callback = callbacks.find(lookupKey);
   }
-
-  delete sb;
 
   if (callback != nullptr) {
     OTF_DEBUG(F("Found callback\n"));

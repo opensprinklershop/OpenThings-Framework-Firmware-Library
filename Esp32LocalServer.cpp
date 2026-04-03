@@ -425,7 +425,7 @@ void WiFiSecureServer::returnSSLContext(mbedtls_ssl_context* ssl) {
 // ============================================================================
 
 Esp32LocalServer::Esp32LocalServer(uint16_t port, uint16_t httpsPort) 
-  : httpServer(port, 1),    // backlog=1 — only one pending connection
+  : httpServer(port, 5),    // backlog=5 — allow pending connections from concurrent AJAX queues
     httpsServer(nullptr),
     httpPort(port),
     httpsPort(httpsPort) {
