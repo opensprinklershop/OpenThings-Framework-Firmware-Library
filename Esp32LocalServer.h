@@ -18,20 +18,9 @@
 #if defined(MBEDTLS_SSL_SESSION_TICKETS)
 #include <mbedtls/ssl_ticket.h>
 #endif
-// Include self-signed certificate data
-#include "cert.h"
 
 // Global pointers for custom certificate override.
-// If set by the firmware before OTF construction, these are used instead
-// of the built-in PROGMEM cert from cert.h.
-extern const unsigned char* otf_custom_cert_data;
-extern uint16_t otf_custom_cert_len;
-extern const unsigned char* otf_custom_key_data;
-extern uint16_t otf_custom_key_len;
-
-// Global pointers for custom certificate override.
-// If set by the firmware before OTF construction, these are used instead
-// of the built-in PROGMEM cert from cert.h.
+// Must be set by the firmware before OTF construction.
 extern const unsigned char* otf_custom_cert_data;
 extern uint16_t otf_custom_cert_len;
 extern const unsigned char* otf_custom_key_data;

@@ -435,17 +435,18 @@ Esp32LocalServer::Esp32LocalServer(uint16_t port, uint16_t httpsPort)
   
   if (httpsPort == 0) return;
 
-  // Use custom certificate if provided, otherwise fall back to built-in PROGMEM cert
-  const unsigned char* cert = otf_custom_cert_data ? otf_custom_cert_data : opensprinkler_crt_DER;
-  uint16_t certLen = otf_custom_cert_data ? otf_custom_cert_len : opensprinkler_crt_DER_len;
-  const unsigned char* key = otf_custom_key_data ? otf_custom_key_data : opensprinkler_key_DER;
-  uint16_t keyLen = otf_custom_key_data ? otf_custom_key_len : opensprinkler_key_DER_len;
-
-  if (otf_custom_cert_data) {
-    OTF_DEBUG("  Using custom certificate (%d bytes cert, %d bytes key)\n", certLen, keyLen);
-  } else {
-    OTF_DEBUG("  Using built-in certificate\n");
+  // Certificate must be provided by firmware via otf_custom_cert_data/otf_custom_key_data
+  if (!otf_custom_cert_data || !otf_custom_key_data) {
+    OTF_DEBUG("  No certificate data provided, HTTPS disabled\n");
+    return;
   }
+
+  const unsigned char* cert = otf_custom_cert_data;
+  uint16_t certLen = otf_custom_cert_len;
+  const unsigned char* key = otf_custom_key_data;
+  uint16_t keyLen = otf_custom_key_len;
+
+  OTF_DEBUG("  Using certificate (%d bytes cert, %d bytes key)\n", certLen, keyLen);
 
   httpsServer = new WiFiSecureServer(httpsPort, cert, certLen, key, keyLen);
 }
