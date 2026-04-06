@@ -26,6 +26,10 @@ typedef std::string WSInterfaceString;
 #endif
 #endif
 
+#if defined(ARDUINO) && defined(ESP8266)
+#define WS_ESP8266_INITIAL_CONNECT_DELAY 15000UL
+#endif
+
 #ifdef SERIAL_DEBUG
 #if defined(ARDUINO)
 #define WS_DEBUG(...)          \
@@ -36,6 +40,7 @@ typedef std::string WSInterfaceString;
   fprintf(stdout, "Websocket: "); \
   fprintf(stdout, __VA_ARGS__)
 #endif
+
 #else
 #define WS_DEBUG(...)
 #endif
@@ -69,10 +74,21 @@ public:
           break;
         case WStype_DISCONNECTED:
           WS_DEBUG("Disconnected!\n");
+          isStreaming = false;
+#if defined(ESP8266)
+          if (enableReconnect) {
+            nextConnectAt = millis() + reconnectInterval;
+          }
+#endif
           _callback(WSEvent_DISCONNECTED, payload, length);
           break;
         case WStype_CONNECTED: {
           WS_DEBUG("Connected to url: %s\n", payload);
+          isStreaming = false;
+#if defined(ESP8266)
+          lastConnectAttempt = millis();
+          nextConnectAt = lastConnectAttempt + reconnectInterval;
+#endif
           _callback(WSEvent_CONNECTED, payload, length);
         } break;
         case WStype_TEXT:
@@ -203,6 +219,8 @@ public:
 private:
   bool enableReconnect = false;
   unsigned long reconnectInterval = 0;
+  unsigned long lastConnectAttempt = 0;
+  unsigned long nextConnectAt = 0;
 
   WSInterfaceString host;
   int port;
@@ -219,6 +237,8 @@ private:
   bool isSecure = false;
 
   bool isStreaming = false;
+
+  void beginStoredConnection();
 };
 
 #else

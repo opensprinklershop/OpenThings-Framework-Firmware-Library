@@ -1,6 +1,23 @@
 #include "Websocket.h"
 
 #if defined(ARDUINO)
+void WebsocketClient::beginStoredConnection() {
+  if (host.length() == 0 || port <= 0 || path.length() == 0) {
+    return;
+  }
+
+  lastConnectAttempt = millis();
+  nextConnectAt = lastConnectAttempt + reconnectInterval;
+
+  if (isSecure) {
+    WS_DEBUG("Connecting to wss://%s:%d%s (deferred)\n", host.c_str(), port, path.c_str());
+    WebSocketsClient::beginSSL(host.c_str(), port, path.c_str());
+  } else {
+    WS_DEBUG("Connecting to ws://%s:%d%s (deferred)\n", host.c_str(), port, path.c_str());
+    WebSocketsClient::begin(host.c_str(), port, path.c_str());
+  }
+}
+
 void WebsocketClient::enableHeartbeat(unsigned long interval, unsigned long timeout, uint8_t maxMissed) {
   WebSocketsClient::enableHeartbeat(interval, timeout, maxMissed);
 }
@@ -10,11 +27,30 @@ void WebsocketClient::disableHeartbeat() {
 }
 
 void WebsocketClient::setReconnectInterval(unsigned long interval) {
+#if defined(ESP8266)
+  enableReconnect = true;
+  reconnectInterval = interval;
+  if (nextConnectAt == 0) {
+    nextConnectAt = millis() + interval;
+  }
+#else
   WebSocketsClient::setReconnectInterval(interval);
+#endif
 }
 
 void WebsocketClient::poll() {
+#if defined(ESP8266)
+  if (enableReconnect && host.length() > 0 && port > 0 && path.length() > 0 && !clientIsConnected(&_client)) {
+    if ((long)(millis() - nextConnectAt) >= 0) {
+      beginStoredConnection();
+    }
+  }
+  yield();
+#endif
   WebSocketsClient::loop();
+#if defined(ESP8266)
+  yield();
+#endif
 }
 
 void WebsocketClient::onEvent(WebSocketEventCallback callback) {
@@ -23,11 +59,40 @@ void WebsocketClient::onEvent(WebSocketEventCallback callback) {
 }
 
 void WebsocketClient::connect(WSInterfaceString host, int port, WSInterfaceString path) {
+  this->host = host;
+  this->port = port;
+  this->path = path;
+  this->isSecure = false;
+
+#if defined(ESP8266)
+  enableReconnect = true;
+  if (reconnectInterval == 0) {
+    reconnectInterval = 30000UL;
+  }
+  nextConnectAt = millis() + WS_ESP8266_INITIAL_CONNECT_DELAY;
+  lastConnectAttempt = 0;
+  WS_DEBUG("Scheduling ws://%s:%d%s after boot delay\n", host.c_str(), port, path.c_str());
+#else
   WS_DEBUG("Connecting to ws://%s:%d%s\n", host.c_str(), port, path.c_str());
   WebSocketsClient::begin(host, port, path);
+#endif
 }
 
 void WebsocketClient::connectSecure(WSInterfaceString host, int port, WSInterfaceString path) {
+  this->host = host;
+  this->port = port;
+  this->path = path;
+  this->isSecure = true;
+
+#if defined(ESP8266)
+  enableReconnect = true;
+  if (reconnectInterval == 0) {
+    reconnectInterval = 30000UL;
+  }
+  nextConnectAt = millis() + WS_ESP8266_INITIAL_CONNECT_DELAY;
+  lastConnectAttempt = 0;
+  WS_DEBUG("Scheduling wss://%s:%d%s after boot delay\n", host.c_str(), port, path.c_str());
+#else
   WS_DEBUG("Connecting to wss://%s:%d%s (insecure mode)\n", host.c_str(), port, path.c_str());
   
   // For ESP32: Set SSL to insecure mode to avoid certificate validation failures
@@ -43,6 +108,7 @@ void WebsocketClient::connectSecure(WSInterfaceString host, int port, WSInterfac
   #else
     WebSocketsClient::beginSSL(host.c_str(), port, path.c_str());
   #endif
+#endif
 }
 
 void WebsocketClient::resetStreaming() {
@@ -73,9 +139,11 @@ bool WebsocketClient::send(uint8_t *payload, size_t length, bool headerToPayload
 
   if (clientIsConnected(&_client)) {
     if (isStreaming) {
-      return sendFrame(&_client, WSop_continuation, payload, length, false, headerToPayload);
+      bool result = sendFrame(&_client, WSop_continuation, payload, length, false, headerToPayload);
+      return result;
     } else {
-      return sendFrame(&_client, WSop_text, payload, length, true, headerToPayload);
+      bool result = sendFrame(&_client, WSop_text, payload, length, true, headerToPayload);
+      return result;
     }
   }
 
