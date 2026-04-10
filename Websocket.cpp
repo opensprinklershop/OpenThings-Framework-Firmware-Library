@@ -6,8 +6,12 @@ void WebsocketClient::beginStoredConnection() {
     return;
   }
 
+  if (reconnectBackoffInterval < reconnectInterval) {
+    reconnectBackoffInterval = reconnectInterval;
+  }
+
   lastConnectAttempt = millis();
-  nextConnectAt = lastConnectAttempt + reconnectInterval;
+  nextConnectAt = lastConnectAttempt + reconnectBackoffInterval;
 
   if (isSecure) {
     WS_DEBUG("Connecting to wss://%s:%d%s (deferred)\n", host.c_str(), port, path.c_str());
@@ -30,6 +34,7 @@ void WebsocketClient::setReconnectInterval(unsigned long interval) {
 #if defined(ESP8266)
   enableReconnect = true;
   reconnectInterval = interval;
+  reconnectBackoffInterval = interval;
   if (nextConnectAt == 0) {
     nextConnectAt = millis() + interval;
   }
@@ -69,6 +74,7 @@ void WebsocketClient::connect(WSInterfaceString host, int port, WSInterfaceStrin
   if (reconnectInterval == 0) {
     reconnectInterval = 30000UL;
   }
+  reconnectBackoffInterval = reconnectInterval;
   nextConnectAt = millis() + WS_ESP8266_INITIAL_CONNECT_DELAY;
   lastConnectAttempt = 0;
   WS_DEBUG("Scheduling ws://%s:%d%s after boot delay\n", host.c_str(), port, path.c_str());
@@ -89,6 +95,7 @@ void WebsocketClient::connectSecure(WSInterfaceString host, int port, WSInterfac
   if (reconnectInterval == 0) {
     reconnectInterval = 30000UL;
   }
+  reconnectBackoffInterval = reconnectInterval;
   nextConnectAt = millis() + WS_ESP8266_INITIAL_CONNECT_DELAY;
   lastConnectAttempt = 0;
   WS_DEBUG("Scheduling wss://%s:%d%s after boot delay\n", host.c_str(), port, path.c_str());

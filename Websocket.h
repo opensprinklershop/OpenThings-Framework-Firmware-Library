@@ -77,7 +77,12 @@ public:
           isStreaming = false;
 #if defined(ESP8266)
           if (enableReconnect) {
-            nextConnectAt = millis() + reconnectInterval;
+            if (reconnectBackoffInterval < reconnectInterval) {
+              reconnectBackoffInterval = reconnectInterval;
+            } else {
+              reconnectBackoffInterval = min(reconnectBackoffInterval * 2UL, 60000UL);
+            }
+            nextConnectAt = millis() + reconnectBackoffInterval;
           }
 #endif
           _callback(WSEvent_DISCONNECTED, payload, length);
@@ -87,6 +92,7 @@ public:
           isStreaming = false;
 #if defined(ESP8266)
           lastConnectAttempt = millis();
+          reconnectBackoffInterval = reconnectInterval;
           nextConnectAt = lastConnectAttempt + reconnectInterval;
 #endif
           _callback(WSEvent_CONNECTED, payload, length);
@@ -219,6 +225,7 @@ public:
 private:
   bool enableReconnect = false;
   unsigned long reconnectInterval = 0;
+  unsigned long reconnectBackoffInterval = 0;
   unsigned long lastConnectAttempt = 0;
   unsigned long nextConnectAt = 0;
 
