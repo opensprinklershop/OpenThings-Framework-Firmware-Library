@@ -174,8 +174,28 @@ char Request::parseQuery(char *str, size_t length, size_t &index) {
           value = &str[index];
         }
 
+        // DEBUG: log raw encoded value for wto before decoding
+        if (strcmp(key, "wto") == 0) {
+          #if defined(ARDUINO)
+          Serial.printf("OTF DEBUG: wto raw encoded = '%s'\n", value);
+          #else
+          fprintf(stdout, "OTF DEBUG: wto raw encoded = '%s'\n", value);
+          fflush(stdout);
+          #endif
+        }
+
         decodeQueryParameter(value);
         REQ_DEBUG((char *) F("Found query parameter '%s' with value '%s'.\n"), key, value);
+
+        // DEBUG: log decoded value for wto after decoding
+        if (strcmp(key, "wto") == 0) {
+          #if defined(ARDUINO)
+          Serial.printf("OTF DEBUG: wto decoded = '%s'\n", value);
+          #else
+          fprintf(stdout, "OTF DEBUG: wto decoded = '%s'\n", value);
+          fflush(stdout);
+          #endif
+        }
 
         queryParams.add(key, value);
 
