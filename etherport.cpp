@@ -261,14 +261,20 @@ int EthernetClient::timedRead() {
 }
 
 size_t EthernetClient::readBytesUntil(char terminator, char *buffer, size_t length) {
+	// NOTE: the previous implementation read one byte ahead of the length check,
+	// which caused it to silently consume and discard one byte from the stream
+	// whenever the destination buffer filled exactly (no terminator yet).
+	// OTF reads request lines in 256-byte chunks via this function, so a single
+	// byte was dropped at every chunk boundary, producing subtle URL corruption
+	// (e.g. "%22%22" becoming "%22%2"). The corrected version only consumes a
+	// byte from the stream when there is room to store it.
 	size_t n = 0;
-	int c = timedRead();
-  	while (c >= 0 && c != terminator && length>0)
-  	{
-		buffer[n] = (char)c;
+	while (length > 0) {
+		int c = timedRead();
+		if (c < 0) break;                // timeout / EOF
+		if (c == (uint8_t)terminator) break; // terminator consumed, not stored
+		buffer[n++] = (char)c;
 		length--;
-		n++;
-		c = timedRead();
 	}
 	return n;
 }

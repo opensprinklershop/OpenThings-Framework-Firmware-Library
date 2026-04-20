@@ -1,4 +1,5 @@
 #include "Request.h"
+#include <ctype.h>
 
 using namespace OTF;
 
@@ -286,13 +287,20 @@ void Request::decodeQueryParameter(char *value) {
     if (character == '+') {
       character = ' ';
     } else if (character == '%') {
-      char highDigit = value[index + ++offset];
-      char lowDigit = value[index + ++offset];
+      char highDigit = value[index + offset + 1];
+      char lowDigit = value[index + offset + 2];
       if (highDigit == '\0' || lowDigit == '\0') {
         // Abort decoding because the query string is illegally formatted.
         return;
       }
-
+      // Validate both digits are actually hex. If not, emit a literal '%' and
+      // re-process the following character normally instead of silently
+      // producing a garbage byte via strtol (which tolerates non-hex input).
+      if (!isxdigit((unsigned char)highDigit) || !isxdigit((unsigned char)lowDigit)) {
+        value[index++] = '%';
+        continue;
+      }
+      offset += 2;
       char hex[3] = {highDigit, lowDigit, '\0'};
       character = strtol(hex, nullptr, 16);
     }
