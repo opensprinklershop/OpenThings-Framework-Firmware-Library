@@ -100,7 +100,7 @@ void OpenThingsFramework::on(const char *path, callback_t callback, OTFHTTPMetho
   size_t len = strlen(path) + 4; // method digits + path + \0
   char *key = new char[len];
   makeMapKeyBuf(key, len, method, path);
-  callbacks.add(key, callback);
+  callbacks.addOwned(key, callback);
 }
 
 #if defined(ARDUINO)
@@ -110,7 +110,7 @@ void OpenThingsFramework::on(const __FlashStringHelper *path, callback_t callbac
   char *key = new char[len];
   int offset = snprintf(key, 4, "%d", (int)method);
   strncpy_P(key + offset, (const char *)path, pathLen + 1);
-  callbacks.add(key, callback);
+  callbacks.addOwned(key, callback);
 }
 #endif
 

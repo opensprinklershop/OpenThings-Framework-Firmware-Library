@@ -224,6 +224,7 @@ public:
 
 private:
   bool enableReconnect = false;
+  bool connectionConfigured = false;
   unsigned long reconnectInterval = 0;
   unsigned long reconnectBackoffInterval = 0;
   unsigned long lastConnectAttempt = 0;

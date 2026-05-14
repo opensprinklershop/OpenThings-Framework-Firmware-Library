@@ -77,6 +77,10 @@ namespace OTF {
       _add(new LinkedMapNode<T>(key, value));
     }
 
+    void addOwned(const char *key, T value) {
+      _add(new LinkedMapNode<T>(key, value, true));
+    }
+
     #if defined(ARDUINO)
     void add(const __FlashStringHelper *key, T value) {
       _add(new LinkedMapNode<T>(key, value), true);
@@ -101,8 +105,7 @@ namespace OTF {
   template<class T>
   class LinkedMapNode {
   private:
-    /** Indicates if the key was copied into RAM from flash memory and needs to be freed when the object is destroyed. */
-    bool keyFromFlash = false;
+    bool keyOwned = false;
 
   public:
     const char *key = nullptr;
@@ -118,15 +121,15 @@ namespace OTF {
     //   this->value = value;
     // }
 
-    LinkedMapNode(const char *key, T value) {
+    LinkedMapNode(const char *key, T value, bool keyOwned = false) {
       this->key = key;
       this->value = value;
+      this->keyOwned = keyOwned;
     }
 
     ~LinkedMapNode() {
-      // Delete the key if it was copied into RAM from flash memory.
-      if (keyFromFlash) {
-        delete key;
+      if (keyOwned) {
+        delete[] key;
       }
     }
   };

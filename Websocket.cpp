@@ -6,6 +6,12 @@ void WebsocketClient::beginStoredConnection() {
     return;
   }
 
+#if defined(ESP8266)
+  if (connectionConfigured) {
+    return;
+  }
+#endif
+
   if (reconnectBackoffInterval < reconnectInterval) {
     reconnectBackoffInterval = reconnectInterval;
   }
@@ -20,6 +26,11 @@ void WebsocketClient::beginStoredConnection() {
     WS_DEBUG("Connecting to ws://%s:%d%s (deferred)\n", host.c_str(), port, path.c_str());
     WebSocketsClient::begin(host.c_str(), port, path.c_str());
   }
+
+#if defined(ESP8266)
+  WebSocketsClient::setReconnectInterval(reconnectBackoffInterval);
+  connectionConfigured = true;
+#endif
 }
 
 void WebsocketClient::enableHeartbeat(unsigned long interval, unsigned long timeout, uint8_t maxMissed) {
@@ -35,6 +46,7 @@ void WebsocketClient::setReconnectInterval(unsigned long interval) {
   enableReconnect = true;
   reconnectInterval = interval;
   reconnectBackoffInterval = interval;
+  WebSocketsClient::setReconnectInterval(interval);
   if (nextConnectAt == 0) {
     nextConnectAt = millis() + interval;
   }
@@ -45,7 +57,7 @@ void WebsocketClient::setReconnectInterval(unsigned long interval) {
 
 void WebsocketClient::poll() {
 #if defined(ESP8266)
-  if (enableReconnect && host.length() > 0 && port > 0 && path.length() > 0 && !clientIsConnected(&_client)) {
+  if (enableReconnect && !connectionConfigured && host.length() > 0 && port > 0 && path.length() > 0 && !clientIsConnected(&_client)) {
     if ((long)(millis() - nextConnectAt) >= 0) {
       beginStoredConnection();
     }
@@ -71,6 +83,7 @@ void WebsocketClient::connect(WSInterfaceString host, int port, WSInterfaceStrin
 
 #if defined(ESP8266)
   enableReconnect = true;
+  connectionConfigured = false;
   if (reconnectInterval == 0) {
     reconnectInterval = 30000UL;
   }
@@ -92,6 +105,7 @@ void WebsocketClient::connectSecure(WSInterfaceString host, int port, WSInterfac
 
 #if defined(ESP8266)
   enableReconnect = true;
+  connectionConfigured = false;
   if (reconnectInterval == 0) {
     reconnectInterval = 30000UL;
   }
