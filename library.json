@@ -9,7 +9,8 @@
     "build": {
         "srcFilter": [
             "+<*>",
-            "-<etherport.h>"
+            "-<etherport.h>",
+            "-<build/*>"
         ],
         "flags": [
             "-DARDUINO_ESP32"
