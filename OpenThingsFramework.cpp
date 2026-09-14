@@ -447,6 +447,14 @@ void OpenThingsFramework::fillResponse(const Request &req, Response &res) {
 void OpenThingsFramework::defaultMissingPageCallback(const Request &req, Response &res) {
   res.writeStatus(404, F("Not found"));
   res.writeHeader(F("content-type"), F("text/plain"));
+  // Same CORS/cache headers as every regular API reply. Without them a browser
+  // page served from another origin (the hosted UI) is not allowed to read this
+  // 404 at all: it sees a network error (status 0) instead of "endpoint missing"
+  // and cannot degrade gracefully, e.g. an older firmware without /jsn looked
+  // like an unreachable device.
+  res.writeHeader(F("Access-Control-Allow-Origin"), F("*"));
+  res.writeHeader(F("Cache-Control"), F("max-age=0, no-cache, no-store, must-revalidate"));
+  res.writeHeader(F("Connection"), F("close"));
   const char* msg = "The requested page does not exist";
   res.writeBodyData(msg, strlen(msg));
 }
