@@ -28,6 +28,9 @@ typedef std::string WSInterfaceString;
 #endif
 #endif
 
+// Upper bound for the exponential reconnect backoff (ESP32 path).
+#define WS_MAX_RECONNECT_BACKOFF 60000UL
+
 #if defined(ARDUINO) && defined(ESP8266)
 #define WS_ESP8266_INITIAL_CONNECT_DELAY 15000UL
 #endif
@@ -96,6 +99,9 @@ public:
           lastConnectAttempt = millis();
           reconnectBackoffInterval = reconnectInterval;
           nextConnectAt = lastConnectAttempt + reconnectInterval;
+#else
+          reconnectBackoffInterval = 0; // first retry after reconnectInterval, then doubling
+          nextConnectAt = 0;
 #endif
           _callback(WSEvent_CONNECTED, payload, length);
         } break;

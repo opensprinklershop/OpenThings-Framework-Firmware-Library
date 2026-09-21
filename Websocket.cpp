@@ -51,6 +51,13 @@ void WebsocketClient::setReconnectInterval(unsigned long interval) {
     nextConnectAt = millis() + interval;
   }
 #else
+  reconnectInterval = interval;
+  reconnectBackoffInterval = 0;
+  // Keep the very first attempt immediate; afterwards (disconnectCloud/reconnectCloud)
+  // the new interval applies from now on.
+  if (lastConnectAttempt != 0) {
+    nextConnectAt = (millis() + interval) | 1UL;
+  }
   WebSocketsClient::setReconnectInterval(interval);
 #endif
 }
@@ -63,6 +70,27 @@ void WebsocketClient::poll() {
     }
   }
   yield();
+#else
+  // A connect attempt blocks the caller (TCP connect + TLS handshake, up to several
+  // seconds). Retrying every reconnectInterval while the cloud is unreachable starves
+  // the local HTTP server, so back off exponentially like the ESP8266 path does.
+  if (!clientIsConnected(&_client)) {
+    if (nextConnectAt != 0 && (long)(millis() - nextConnectAt) < 0) {
+      return;
+    }
+    WebSocketsClient::loop();
+    lastConnectAttempt = millis() | 1UL;
+    if (!clientIsConnected(&_client)) {
+      unsigned long maxBackoff = reconnectInterval > WS_MAX_RECONNECT_BACKOFF ? reconnectInterval : WS_MAX_RECONNECT_BACKOFF;
+      if (reconnectBackoffInterval < reconnectInterval) {
+        reconnectBackoffInterval = reconnectInterval;
+      } else {
+        reconnectBackoffInterval = min(reconnectBackoffInterval * 2UL, maxBackoff);
+      }
+      nextConnectAt = (millis() + reconnectBackoffInterval) | 1UL;
+    }
+    return;
+  }
 #endif
   WebSocketsClient::loop();
 #if defined(ESP8266)
