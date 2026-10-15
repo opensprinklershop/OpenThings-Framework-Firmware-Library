@@ -39,6 +39,18 @@
 // The size of the buffer to store the incoming request line and headers (does not include body). Larger requests will be discarded.
 #define HEADERS_BUFFER_SIZE 1536
 
+// Upper bound for a request body (Content-Length). The body is read into a heap
+// buffer of exactly that size, so without a limit a single unauthenticated
+// request could exhaust the heap (ESP8266: ~24 KB free) and reset the device.
+// Larger bodies are answered with 413 and the connection is dropped.
+#ifndef OTF_MAX_BODY_LENGTH
+  #if defined(ESP8266)
+    #define OTF_MAX_BODY_LENGTH 8192
+  #else
+    #define OTF_MAX_BODY_LENGTH 65536
+  #endif
+#endif
+
 namespace OTF {
   typedef void (*callback_t)(const Request &request, Response &response);
 

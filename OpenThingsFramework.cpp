@@ -1,4 +1,5 @@
 #include "OpenThingsFramework.h"
+#include <new>
 #include "StringBuilder.hpp"
 #include <string>
 
@@ -225,10 +226,19 @@ void OpenThingsFramework::localServerLoop() {
       #else
       long contentLength = atol(contentLengthString);
       #endif
+      if (contentLength > (long) OTF_MAX_BODY_LENGTH) {
+        OTF_DEBUG(F("Request body too large (%ld bytes)\n"), contentLength);
+        localClient->print(F("HTTP/1.1 413 Request too large\r\nConnection: close\r\n\r\nThe request body was too large"));
+        return;
+      }
       // If the header specifies a length of 0 or could not be parsed, the message has no body.
       if (contentLength > 0) {
         // Read the body from the client (+1 for NUL terminator).
-        bodyBuffer = new char[contentLength + 1];
+        bodyBuffer = new (std::nothrow) char[contentLength + 1];
+        if (bodyBuffer == nullptr) {
+          localClient->print(F("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\nOut of memory"));
+          return;
+        }
         size_t bodyLength = 0;
         timeout = millis()+WIFI_CONNECTION_TIMEOUT;
         while (localClient->dataAvailable() && millis()<timeout) {
