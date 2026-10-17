@@ -94,6 +94,7 @@ public:
     void flush();
     void stop();
     bool connected() { return client.connected(); }
+    uint32_t remoteIP() { return (uint32_t)client.remoteIP(); }
   };
 
   // HTTPS Client (secure with SSL/TLS)
@@ -124,6 +125,7 @@ public:
     void flush();
     void stop();
     bool connected() { return client.connected(); }
+    uint32_t remoteIP() { return (uint32_t)client.remoteIP(); }
   };
 
   class Esp32LocalServer : public LocalServer {

@@ -51,6 +51,11 @@ namespace OTF {
     
     /** Returns true if the client is still connected. */
     virtual bool connected() = 0;
+
+    /** IPv4 address of the peer (network byte order as the Arduino IPAddress
+     *  uint32 conversion yields), 0 when unknown. Used for per-client login
+     *  lockout. */
+    virtual uint32_t remoteIP() { return 0; }
   };
 
   class LocalServer {

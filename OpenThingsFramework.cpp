@@ -214,6 +214,7 @@ void OpenThingsFramework::localServerLoop() {
 
   OTF_DEBUG(F("Parsing request\n"));
   Request request(buffer, length, false);
+  request.remoteIp = localClient->remoteIP();
 
   char *bodyBuffer = NULL;
   // If the request was valid, read the body and add it to the Request object.

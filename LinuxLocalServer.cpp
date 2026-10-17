@@ -1,5 +1,7 @@
 #if !defined(ARDUINO)
 #include "LinuxLocalServer.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
 
 using namespace OTF;
 
@@ -72,5 +74,13 @@ void LinuxLocalClient::flush() {
 
 void LinuxLocalClient::stop() {
 	client.stop();
+}
+
+uint32_t OTF::LinuxLocalClient::remoteIP() {
+  struct sockaddr_in addr;
+  socklen_t len = sizeof(addr);
+  if (getpeername(client.GetSocket(), (struct sockaddr *)&addr, &len) != 0) return 0;
+  if (addr.sin_family != AF_INET) return 0;
+  return (uint32_t)addr.sin_addr.s_addr;
 }
 #endif

@@ -58,6 +58,7 @@ namespace OTF {
     size_t bodyLength = 0;
     RequestType requestType = INVALID;
     bool cloudRequest;
+    uint32_t remoteIp = 0;
 
     /**
      * Parses the query of the request.
@@ -135,6 +136,10 @@ namespace OTF {
 
     /** Returns the length of the request body. */
     size_t getBodyLength() const;
+
+    /** IPv4 address of the client for local requests (0 for cloud requests or
+     *  when the transport does not provide it). */
+    uint32_t getRemoteIP() const { return remoteIp; }
 
     /** Indicates if this request is a multipart request, a non-multipart request, or an illegally formatted request. */
     RequestType getType() const;

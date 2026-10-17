@@ -24,6 +24,7 @@ namespace OTF {
     void flush();
     void stop();
     bool connected() { return client.connected(); }
+    uint32_t remoteIP();
   };
 
 
